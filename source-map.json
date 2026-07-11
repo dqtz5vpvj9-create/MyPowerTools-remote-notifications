@@ -3,7 +3,7 @@
   "toolId": "remote-notifications",
   "sourceClassification": "original-product-source",
   "sourceNote": "The snapshot includes the current dirty PyQt, queue, notification server, and Windows Toast implementation.",
-  "capturedAtUtc": "2026-07-11T16:41:52.9965531+00:00",
+  "capturedAtUtc": "2026-07-11T16:45:08.1893331+00:00",
   "originalSource": {
     "sourceRoot": "C:\\Users\\lixinrui\\repo\\androidtools",
     "gitTopLevel": "C:/Users/lixinrui/repo/androidtools",
@@ -153,8 +153,8 @@
     "src/MyPowerTools.Shell.Avalonia/**/*RemoteNotification*",
     "src/MyPowerTools.Tests/RemoteNotification*"
   ],
-  "currentIntegrationMatchedFileCount": 79,
-  "currentIntegrationCopiedFileCount": 79,
+  "currentIntegrationMatchedFileCount": 48,
+  "currentIntegrationCopiedFileCount": 48,
   "currentIntegrationUnmatchedGlobs": [],
   "currentIntegrationMissingFiles": []
 }
