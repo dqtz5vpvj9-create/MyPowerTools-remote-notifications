@@ -1,0 +1,17 @@
+[Unit]
+Description=Simple HTTP Notification Server
+
+[Service]
+Type=simple
+ExecStart=/home/ubuntu/miniconda3/envs/android_automatic/bin/python -m gunicorn --config py_modules/gunicorn_config.py "py_modules.simple_http_notification_server:app"
+Environment=CONDA_EXE=/home/ubuntu/miniconda3/bin/conda
+Environment=SSL_CERT_FILE=/etc/letsencrypt/live/message.lixinrui000.cn/fullchain.pem
+Environment=SSL_KEY_FILE=/etc/letsencrypt/live/message.lixinrui000.cn/privkey.pem
+Environment=SSH_AUTHORIZED_KEYS=/home/ubuntu/.ssh/authorized_keys_{user}
+EnvironmentFile=-/etc/androidtools/notify_server_{user}.env
+Restart=always
+User=root
+WorkingDirectory=/home/ubuntu/repo/androidtools_{user}/
+
+[Install]
+WantedBy=multi-user.target

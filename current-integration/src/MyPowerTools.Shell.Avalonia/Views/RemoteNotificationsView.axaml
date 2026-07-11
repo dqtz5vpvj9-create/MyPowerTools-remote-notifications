@@ -1,0 +1,335 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:MyPowerTools.UI.Controls"
+             xmlns:vm="using:MyPowerTools.Shell.Avalonia.ViewModels"
+             xmlns:local="using:MyPowerTools.Shell.Avalonia.Views"
+             x:Class="MyPowerTools.Shell.Avalonia.Views.RemoteNotificationsView"
+             x:DataType="vm:RemoteNotificationsViewModel"
+             Background="{DynamicResource MptBrushTransparent}"
+             MinHeight="520"
+             ClipToBounds="True">
+  <UserControl.Styles>
+    <Style Selector="Button.label-chip">
+      <Setter Property="Background" Value="{DynamicResource MptBrushControlFillDefault}" />
+      <Setter Property="Foreground" Value="{DynamicResource MptBrushTextPrimary}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MptBrushControlStrokeDefault}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource MptRadiusBadge}" />
+      <Setter Property="Padding" Value="{DynamicResource MptChipPadding}" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="FontSize" Value="{DynamicResource MptFontSizeMeta}" />
+      <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="Button.label-chip:pointerover">
+      <Setter Property="Background" Value="{DynamicResource MptBrushControlFillHover}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MptBrushBorderStrong}" />
+    </Style>
+    <Style Selector="Button.label-chip.unread">
+      <Setter Property="BorderBrush" Value="{DynamicResource MptBrushWarning}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.label-chip.selected">
+      <Setter Property="Background" Value="{DynamicResource MptBrushAccent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MptBrushAccent}" />
+      <Setter Property="Foreground" Value="{DynamicResource MptBrushAccentText}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.notification-card">
+      <Setter Property="Margin" Value="{DynamicResource MptGapBottomM}" />
+      <Setter Property="Padding" Value="{DynamicResource MptUniformL}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource MptRadiusCard}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource MptBrushBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource MptBrushCardBackground}" />
+    </Style>
+    <Style Selector="Border.notification-card:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource MptBrushBorderStrong}" />
+      <Setter Property="Background" Value="{DynamicResource MptBrushLayerAltBackground}" />
+    </Style>
+    <Style Selector="ListBox.notification-list">
+      <Setter Property="Background" Value="{DynamicResource MptBrushTransparent}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="{DynamicResource MptGapRightS}" />
+    </Style>
+    <Style Selector="ListBox.notification-list ListBoxItem">
+      <Setter Property="Background" Value="{DynamicResource MptBrushTransparent}" />
+      <Setter Property="Padding" Value="{DynamicResource MptNoThickness}" />
+      <Setter Property="Margin" Value="{DynamicResource MptNoThickness}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FocusAdorner" Value="{x:Null}" />
+    </Style>
+    <Style Selector="ListBox.notification-list ListBoxItem:pointerover">
+      <Setter Property="Background" Value="{DynamicResource MptBrushTransparent}" />
+    </Style>
+    <Style Selector="ListBox.notification-list ListBoxItem:selected">
+      <Setter Property="Background" Value="{DynamicResource MptBrushTransparent}" />
+    </Style>
+    <Style Selector="ScrollBar:vertical">
+      <Setter Property="Width" Value="8" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid MaxWidth="1280"
+        HorizontalAlignment="Stretch"
+        RowDefinitions="Auto,Auto,Auto,*">
+    <Grid Grid.Row="0"
+          ColumnDefinitions="Auto,*,Auto,Auto"
+          ColumnSpacing="14"
+          MinHeight="48"
+          Margin="0,0,0,4">
+      <StackPanel VerticalAlignment="Center">
+        <TextBlock Classes="MptPageTitle"
+                   Text="{Binding Title}"
+                   ToolTip.Tip="{Binding Subtitle}" />
+      </StackPanel>
+
+      <Expander Grid.Column="1"
+                FontSize="{DynamicResource MptFontSizeMeta}"
+                HorizontalContentAlignment="Stretch"
+                ToolTip.Tip="Expand connection details"
+                VerticalAlignment="Center"
+                IsExpanded="False">
+        <Expander.Header>
+          <Grid ColumnDefinitions="Auto,Auto,*,1,Auto"
+                ColumnSpacing="8"
+                MinHeight="32">
+            <Border Width="20"
+                    Height="20"
+                    CornerRadius="{DynamicResource MptRadiusBadge}"
+                    Background="{Binding StatusBackground}"
+                    VerticalAlignment="Center">
+              <Border Width="7"
+                      Height="7"
+                      CornerRadius="{DynamicResource MptRadiusBadge}"
+                      Background="{Binding StatusForeground}"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Grid.Column="1"
+                       Text="{Binding StatusText}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+            <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        Spacing="{DynamicResource MptSpacingXs}"
+                        VerticalAlignment="Center">
+              <TextBlock Text="{Binding LastSyncText}"
+                         Classes="MptMeta" />
+              <TextBlock Classes="MptMeta" Text="·" />
+              <TextBlock Text="{Binding SyncResultText}"
+                         FontSize="{DynamicResource MptFontSizeMeta}" />
+            </StackPanel>
+            <Border Grid.Column="3"
+                    Width="1"
+                    Height="20"
+                    Background="{DynamicResource MptBrushDivider}" />
+            <TextBlock Grid.Column="4"
+                       Text="{Binding MessageCountText}"
+                       FontSize="{DynamicResource MptFontSizeMeta}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+          </Grid>
+        </Expander.Header>
+          <Grid ColumnDefinitions="2*,1.2*,Auto,Auto,2*"
+                ColumnSpacing="20"
+                Margin="0,4,0,2">
+            <TextBlock Text="{Binding Server}"
+                       Classes="MptMeta"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding Server}" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding Latest, StringFormat='Latest: {0}'}"
+                       Classes="MptMeta"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="2"
+                       Text="{Binding Fetched, StringFormat='Fetched: {0}'}"
+                       Classes="MptMeta" />
+            <TextBlock Grid.Column="3"
+                       Text="{Binding Shown, StringFormat='Shown: {0}'}"
+                       Classes="MptMeta" />
+            <TextBlock Grid.Column="4"
+                       Text="{Binding LastError, StringFormat='Last error: {0}'}"
+                       Classes="MptMeta"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip.Tip="{Binding LastError}" />
+          </Grid>
+      </Expander>
+
+      <controls:MptCheckBox Grid.Column="2"
+                            Content="Keep banners"
+                            IsChecked="{Binding PersistentWindowsToasts, Mode=TwoWay}"
+                            ToolTip.Tip="Keep Windows notification banners visible until dismissed"
+                            VerticalAlignment="Center" />
+      <controls:MptButton Grid.Column="3"
+                          Content="Clear all"
+                          Click="OnClearClick"
+                          ToolTip.Tip="Remove stored notifications"
+                          VerticalAlignment="Center" />
+    </Grid>
+
+    <Border Grid.Row="1"
+            Padding="{DynamicResource MptUniformL}"
+            CornerRadius="{DynamicResource MptRadiusCard}"
+            BorderBrush="{DynamicResource MptBrushDanger}"
+            BorderThickness="1"
+            Background="{DynamicResource MptBrushWarningBackground}"
+            IsVisible="{Binding HasSyncError}">
+      <Grid RowDefinitions="Auto,Auto"
+            ColumnDefinitions="Auto,*,Auto"
+            ColumnSpacing="12">
+        <TextBlock Text="!"
+                   Foreground="{DynamicResource MptBrushDanger}"
+                   FontSize="{DynamicResource MptFontSizeCardTitle}"
+                   VerticalAlignment="Top" />
+        <StackPanel Grid.Column="1" Spacing="{DynamicResource MptSpacingXs}">
+          <TextBlock Text="{Binding ErrorTitle}"
+                     FontWeight="SemiBold" />
+          <TextBlock Text="{Binding ErrorSummary}"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Grid.Column="2"
+                    Orientation="Horizontal"
+                    Spacing="{DynamicResource MptSpacingS}"
+                    VerticalAlignment="Center">
+          <controls:MptButton Content="{Binding ErrorDetailsActionLabel}"
+                              Command="{Binding ToggleErrorDetailsCommand}" />
+          <controls:MptButton Classes="MptPrimaryButton"
+                              Content="Retry sync"
+                              Command="{Binding RetryCommand}" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1"
+                      Grid.Column="1"
+                      Grid.ColumnSpan="2"
+                      Margin="{DynamicResource MptGapTopM}"
+                      MaxHeight="116"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      IsVisible="{Binding IsErrorDetailsExpanded}">
+          <SelectableTextBlock Text="{Binding TechnicalErrorDetails}"
+                               Padding="{DynamicResource MptCompactPadding}"
+                               Background="{DynamicResource MptBrushSurfaceInset}"
+                               FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                               FontSize="{DynamicResource MptFontSizeMeta}"
+                               TextWrapping="Wrap" />
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="2"
+            Padding="0,4"
+            BorderBrush="{DynamicResource MptBrushDivider}"
+            BorderThickness="0,1,0,1"
+            IsVisible="{Binding HasLabels}">
+      <Grid>
+        <ScrollViewer
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Chips}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="{DynamicResource MptSpacingS}" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:RemoteNotificationLabelChipViewModel">
+                <controls:MptButton Classes="label-chip"
+                                    Classes.selected="{Binding IsSelected}"
+                                    Classes.unread="{Binding IsUnread}"
+                                    Content="{Binding Label}"
+                                    Command="{Binding SelectCommand}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="3"
+          Margin="0,4,0,0"
+          MinHeight="280">
+      <ListBox x:Name="NotificationList"
+               Classes="notification-list"
+               ItemsSource="{Binding VisibleMessages}"
+               SelectionMode="Single"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+               ScrollViewer.VerticalScrollBarVisibility="Auto">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:RemoteNotificationMessageViewModel">
+            <Border Classes="notification-card"
+                    DoubleTapped="OnMessageDoubleTapped"
+                    ContextRequested="OnMessageContextRequested"
+                    ToolTip.Tip="Double-click to open the complete message"
+                    AutomationProperties.Name="{Binding AccessibleLabel}">
+              <Grid ColumnDefinitions="38,*"
+                    ColumnSpacing="12">
+                <Border Width="36"
+                        Height="36"
+                        CornerRadius="{DynamicResource MptRadiusBadge}"
+                        Background="{Binding IconBackground}"
+                        VerticalAlignment="Top">
+                  <TextBlock Text="{Binding IconGlyph}"
+                             Foreground="{Binding IconForeground}"
+                             FontSize="{DynamicResource MptFontSizeCardTitle}"
+                             FontWeight="Bold"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Grid.Column="1"
+                            Spacing="{DynamicResource MptSpacingM}">
+                  <Grid ColumnDefinitions="*,Auto"
+                        ColumnSpacing="12">
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="{DynamicResource MptSpacingS}">
+                      <TextBlock Text="{Binding Label}"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center" />
+                      <Border Padding="{DynamicResource MptCompactBadgePadding}"
+                              CornerRadius="{DynamicResource MptRadiusControl}"
+                              Background="{DynamicResource MptBrushSurfaceMuted}"
+                              IsVisible="{Binding HasCustomChannel}">
+                        <TextBlock Text="{Binding Channel}"
+                                   Classes="MptMeta" />
+                      </Border>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding RelativeTime}"
+                               Classes="MptMeta"
+                               ToolTip.Tip="{Binding AbsoluteTime}"
+                               VerticalAlignment="Center" />
+                  </Grid>
+
+                  <local:MarkdownTextBlock Markdown="{Binding DisplayMessage}"
+                                           Foreground="{DynamicResource MptBrushTextPrimary}"
+                                           FontSize="{DynamicResource MptFontSizeMeta}"
+                                           LineHeight="20"
+                                           MaxWidth="920"
+                                           MaxLines="8"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="Wrap"
+                                           HorizontalAlignment="Left" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <Border Classes="MptEmptyState"
+              IsVisible="{Binding ShowsEmptyOverlay}">
+        <StackPanel Spacing="{DynamicResource MptSpacingS}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+          <TextBlock Text="○"
+                     FontSize="{DynamicResource MptFontSizeSection}"
+                     Foreground="{DynamicResource MptBrushTextMuted}"
+                     HorizontalAlignment="Center" />
+          <TextBlock Text="{Binding EmptyOverlayText}"
+                     Classes="MptPageSubtitle"
+                     HorizontalAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

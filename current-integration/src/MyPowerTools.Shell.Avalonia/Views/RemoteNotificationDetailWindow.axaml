@@ -1,0 +1,75 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:MyPowerTools.UI.Controls"
+        xmlns:vm="using:MyPowerTools.Shell.Avalonia.ViewModels"
+        xmlns:local="using:MyPowerTools.Shell.Avalonia.Views"
+        x:Class="MyPowerTools.Shell.Avalonia.Views.RemoteNotificationDetailWindow"
+        x:DataType="vm:RemoteNotificationMessageViewModel"
+        Width="920"
+        Height="720"
+        MinWidth="620"
+        MinHeight="460"
+        Background="{DynamicResource MptBrushAppBackground}"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="Auto,*,Auto"
+        Margin="{DynamicResource MptCompactPadding}"
+        RowSpacing="10">
+    <StackPanel Grid.Row="0"
+                Orientation="Horizontal"
+                Spacing="{DynamicResource MptSpacingS}">
+      <Border Width="28"
+              Height="28"
+              CornerRadius="{DynamicResource MptRadiusBadge}"
+              Background="{Binding IconBackground}">
+        <TextBlock Text="{Binding IconGlyph}"
+                   Foreground="{Binding IconForeground}"
+                   FontSize="{DynamicResource MptFontSizeBody}"
+                   FontWeight="Bold"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
+      </Border>
+      <TextBlock Text="{Binding RelativeTime}"
+                 Foreground="{DynamicResource MptBrushTextMuted}"
+                 FontSize="{DynamicResource MptFontSizeMeta}"
+                 ToolTip.Tip="{Binding AbsoluteTime}"
+                 VerticalAlignment="Center" />
+      <Border Background="{DynamicResource MptBrushSurfaceMuted}"
+              CornerRadius="{DynamicResource MptRadiusControl}"
+              Padding="{DynamicResource MptCompactBadgePadding}"
+              IsVisible="{Binding HasCustomChannel}"
+              VerticalAlignment="Center">
+        <TextBlock Text="{Binding Channel}"
+                   Foreground="{DynamicResource MptBrushAccent}"
+                   FontSize="{DynamicResource MptFontSizeMeta}"
+                   FontWeight="Bold" />
+      </Border>
+    </StackPanel>
+
+    <Border Grid.Row="1"
+            Background="{DynamicResource MptBrushCardBackground}"
+            BorderBrush="{DynamicResource MptBrushBorder}"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource MptRadiusControl}">
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto"
+                    Padding="{DynamicResource MptUniformS}">
+        <local:MarkdownTextBlock Markdown="{Binding Message}"
+                                 Foreground="{DynamicResource MptBrushTextPrimary}"
+                                 FontSize="{DynamicResource MptFontSizeMeta}"
+                                 LineHeight="20"
+                                 TextWrapping="Wrap" />
+      </ScrollViewer>
+    </Border>
+
+    <StackPanel Grid.Row="2"
+                Orientation="Horizontal"
+                Spacing="{DynamicResource MptSpacingS}"
+                HorizontalAlignment="Right">
+      <controls:MptButton Classes="MptPrimaryButton"
+                          Content="Copy message"
+                          Click="OnCopyClick" />
+      <controls:MptButton Content="Close"
+                          Click="OnCloseClick" />
+    </StackPanel>
+  </Grid>
+</Window>

@@ -1,0 +1,237 @@
+{
+  "Algorithm": "sha256",
+  "Files": [
+    {
+      "Path": "AndroidTools.MyPowerTools.dll",
+      "Sha256": "51cc5127c87caef5d52b1fbd1a025e3216577fc0a297537594d8392bf930a236"
+    },
+    {
+      "Path": "AndroidTools.MyPowerTools.pdb",
+      "Sha256": "bed8efad5c7b9d2382c1d3bc9ed20f909379b346fdef47d4204432e4f3a82839"
+    },
+    {
+      "Path": "modules/notifications/commands.index.json",
+      "Sha256": "83f8eddcb8886fbfd6fc24cff410489554491886c3e4f33148192390838bcf32"
+    },
+    {
+      "Path": "modules/notifications/module.json",
+      "Sha256": "fe1ca82a0e0b1ae7b645d4a4bd7136524f4f38c629e24d88a0a0a9b1e5e82458"
+    },
+    {
+      "Path": "modules/notifications/settings.schema.json",
+      "Sha256": "f48ed0178a447bf907964946a438ea366eaecb562ffea2e68b3b243f3288fee7"
+    },
+    {
+      "Path": "modules/notifications/ui/dashboard-card.json",
+      "Sha256": "efea9398165e8bc478c7898cf2a174d3af4c549e4cc0d667a129613aa702f3d4"
+    },
+    {
+      "Path": "modules/notifications/ui/detail-page.json",
+      "Sha256": "775be20b8791372fed15c985580eda5eb703877e8cfa223686739c006ed9a388"
+    },
+    {
+      "Path": "modules/notifications/ui/logs.json",
+      "Sha256": "adf3f3ac2abfdbc1ee342a3aeddf8e86a6f0b5ba68e34425651a37674b5fba9c"
+    },
+    {
+      "Path": "modules/notifications/ui/settings.json",
+      "Sha256": "b8e7419d5fa06eb8cadbfd1a7b423dd70b37815c0318a6a066d1c30e2e760eda"
+    },
+    {
+      "Path": "modules/notifications/ui/tool.json",
+      "Sha256": "cac4965941d143dd122c1d3bae297e627356ca512d041d41f7620a0cc03dd89f"
+    },
+    {
+      "Path": "modules/process-monitor/commands.index.json",
+      "Sha256": "950bdb536b3d6fc7f68aef0643c3d7e19a44ea247601326d62c00e8be34264da"
+    },
+    {
+      "Path": "modules/process-monitor/module.json",
+      "Sha256": "6ffa498b1f6eff9c7786ee4ae31b3b31f982b7b7617e6dbbcd1c0c92d6f4e19c"
+    },
+    {
+      "Path": "modules/process-monitor/settings.schema.json",
+      "Sha256": "f48ed0178a447bf907964946a438ea366eaecb562ffea2e68b3b243f3288fee7"
+    },
+    {
+      "Path": "modules/process-monitor/ui/dashboard-card.json",
+      "Sha256": "3f377213e47bf9bd92a8a5686ad61631f3b567f281f259bb0d233ccbb5eb50b2"
+    },
+    {
+      "Path": "modules/process-monitor/ui/detail-page.json",
+      "Sha256": "d7e7e9bec6babfd61e64972c23a56652e3e7fd76b994bd5c9ed637c8752626e1"
+    },
+    {
+      "Path": "modules/process-monitor/ui/logs.json",
+      "Sha256": "14c70fa3b99e3ede40224244bfe45f9a77c1222e6b8a69a6e293140f72790ddc"
+    },
+    {
+      "Path": "modules/process-monitor/ui/settings.json",
+      "Sha256": "a2214006060b356b0a67e941891277d4d86e11a1a0a60671c6f3a4adc864db10"
+    },
+    {
+      "Path": "modules/process-monitor/ui/tool.json",
+      "Sha256": "41167414e0848e91a856c3d9471d19478e979d7bcc77e733e38a9a9848f871b5"
+    },
+    {
+      "Path": "modules/remote-commands/commands.index.json",
+      "Sha256": "935c808bdb71711ac3b23beb21300555d71f9e5280d97f0eee885da86a67f2b4"
+    },
+    {
+      "Path": "modules/remote-commands/module.json",
+      "Sha256": "e2e69ea24fcdb6732f2cbe56b6946f089116c35c734479cf1fd1ac72bdcebba4"
+    },
+    {
+      "Path": "modules/remote-commands/settings.schema.json",
+      "Sha256": "f48ed0178a447bf907964946a438ea366eaecb562ffea2e68b3b243f3288fee7"
+    },
+    {
+      "Path": "modules/remote-commands/ui/dashboard-card.json",
+      "Sha256": "4850dbff2d1100579ed1c80ad270e7ba3fa513955e535a569759cafabe6a21e6"
+    },
+    {
+      "Path": "modules/remote-commands/ui/detail-page.json",
+      "Sha256": "77deac0fcc04e3f8b7f4900441bf570782951023faa0388c1b042c5e3db93be3"
+    },
+    {
+      "Path": "modules/remote-commands/ui/logs.json",
+      "Sha256": "69650c963dc728304652522bbaf52e9a3faf9dc4f9d3a1e68523c90b46873e36"
+    },
+    {
+      "Path": "modules/remote-commands/ui/settings.json",
+      "Sha256": "95cf3c359443305c50861d3a42bcd03b09a72e50813d84c8de166a88170903e6"
+    },
+    {
+      "Path": "modules/remote-commands/ui/tool.json",
+      "Sha256": "21419dceefacc81c3b1234ed6f44d394135f39c4555bf65d6fc9572cfc437bad"
+    },
+    {
+      "Path": "package.json",
+      "Sha256": "3d0d21c187395534c057b3473bfbd0ae3547abbe7f6c535f5f40556aff09e5a8"
+    },
+    {
+      "Path": "shared/powertool/commands.yaml",
+      "Sha256": "c55bfa88d8a4f5e01ae2cdbd7d820b1d6f53a20dff7653444b54f5cf1f47d40d"
+    },
+    {
+      "Path": "shared/powertool/simple_http_notification_conf.py",
+      "Sha256": "fe86a90e3164db1aace85a6fdafe73633a9b6b980fa2c80c15b171b8e0567a5a"
+    },
+    {
+      "Path": "windows/x64/AndroidTools.MyPowerTools.dll",
+      "Sha256": "cbf5dfcea284b20c6da5683000d0410a1f23a6b1a393910fdf4f9bb1305cd959"
+    },
+    {
+      "Path": "windows/x64/AndroidTools.MyPowerTools.pdb",
+      "Sha256": "96795b36921f3eee6267c1f9718818578fe3bb0e385a9892a5a09fa8e36b3155"
+    },
+    {
+      "Path": "windows/x64/Google.Protobuf.dll",
+      "Sha256": "e0deb31c17ad585eaf844fdca5b19a774594813401cace58d30d5996ba094da2"
+    },
+    {
+      "Path": "windows/x64/Grpc.AspNetCore.Server.ClientFactory.dll",
+      "Sha256": "bc5a8b8cfa0ed3f8a4e655f9881d195d7a496749c9ec8b35455d55050b32f964"
+    },
+    {
+      "Path": "windows/x64/Grpc.AspNetCore.Server.dll",
+      "Sha256": "92877399509a0a2c991c9a8d41c49e051993b622fc6cbf8783e6898e7cadcedd"
+    },
+    {
+      "Path": "windows/x64/Grpc.Core.Api.dll",
+      "Sha256": "5674c1203706b5a261e8bbd3499147d94fc80b5f077bf45f9934ca28a9c8574b"
+    },
+    {
+      "Path": "windows/x64/Grpc.Net.Client.dll",
+      "Sha256": "f884d8444feb888656cbb7de87ee8f53a50811329bb32c6e7a7a81cb1de008ef"
+    },
+    {
+      "Path": "windows/x64/Grpc.Net.ClientFactory.dll",
+      "Sha256": "3702c5ba264d5d3066f92b9473588608a408458b824771d015ad3c3cb7df4bdd"
+    },
+    {
+      "Path": "windows/x64/Grpc.Net.Common.dll",
+      "Sha256": "fdff383bbd8e5015f3c4aaaa7508b769228f33c92ba14fec4e59d35c5d78e6ae"
+    },
+    {
+      "Path": "windows/x64/Humanizer.dll",
+      "Sha256": "2769ed8265b691a5482c72506ed274dc52446fa1641997a8c12c66f5b9263d39"
+    },
+    {
+      "Path": "windows/x64/Json.More.dll",
+      "Sha256": "80b6cd50331fa2ded4fbacdbf80dcedd2b142dee679df227c30299d2a3c3840f"
+    },
+    {
+      "Path": "windows/x64/JsonPointer.Net.dll",
+      "Sha256": "ab3e8236f02d8b5110d0bca4f640b1e8550728facfe740d65e0f4bd158c59f8f"
+    },
+    {
+      "Path": "windows/x64/JsonSchema.Net.dll",
+      "Sha256": "35566501866377862d1fd10ed9a0bbd31717c8c2e531ea83febec42255fd4745"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Abstractions.dll",
+      "Sha256": "c09b04362a637db79848bce271503b9325f30e53f93916881e54f426dbdf5821"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Abstractions.pdb",
+      "Sha256": "63043ab8cda905a58e1fe4549cbe22b4f37677a468feb3b0d4b671b27d849f3c"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Packaging.dll",
+      "Sha256": "1bba8b1af2f6b409c08370e0ad74ee510e7de7a3e687f79e68cb3e0e29a78d7f"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Packaging.pdb",
+      "Sha256": "0f33a98b1801c3e89b0be0cbd0ab28aa6137d6e3b27e0f190c22a5e315e7d10e"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Platform.Abstractions.dll",
+      "Sha256": "780b735bf4305e17f88d832e283e12a64e05fcc8a455533b4838b56a484fd825"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Platform.Abstractions.pdb",
+      "Sha256": "28198d54b0d6232eaaccf9dd44b6209672179153a57d09eff9b8f9332a7129fa"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Protocol.dll",
+      "Sha256": "481ae6cc4f99f39cb7609f29bec41c14b6e276ccffe31dfa016e368c5b24acfd"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Protocol.pdb",
+      "Sha256": "29a5b5d426fc6a65c9987d5641a8d6e3165f792506ea9ec52b0f30020acd5c88"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Runtime.dll",
+      "Sha256": "e46047827fce3ab1cd29b476f9dbfcdbecae6cc64d3e6d7a4ab16a0e85350bab"
+    },
+    {
+      "Path": "windows/x64/MyPowerTools.Runtime.pdb",
+      "Sha256": "d665ea7a45015bdbc86b08d1be030b7b35ef0ed60433f9912aca28e53ad90381"
+    },
+    {
+      "Path": "windows/x64/powertoold.deps.json",
+      "Sha256": "a7be94674e2c01c6dac501eb9f93bfdd7fe09344345842492452f8fa849b09ad"
+    },
+    {
+      "Path": "windows/x64/powertoold.dll",
+      "Sha256": "47863099de75d31fb7e2702198aec743bee613cfa5d2ae955f89c8c4b4e0e5d8"
+    },
+    {
+      "Path": "windows/x64/powertoold.exe",
+      "Sha256": "6f84e309b29abf3dbce5d6ea6707edaad470017c6291aae6387b468e1d5b4ee3"
+    },
+    {
+      "Path": "windows/x64/powertoold.pdb",
+      "Sha256": "cec7036a816380d519cb51dc495027290746ebb52305d192b802bf13342d9f0e"
+    },
+    {
+      "Path": "windows/x64/powertoold.runtimeconfig.json",
+      "Sha256": "41442586a8262bc96a1c80f82f4d9384c03bfd465d221cbf01fb3563170f9e65"
+    },
+    {
+      "Path": "windows/x64/powertoold.staticwebassets.endpoints.json",
+      "Sha256": "eb6525c892afda953a2560f151f9c5e5bc6e79ef6741d886488ac450262c91e3"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "commands": [
+    {
+      "id": "android-tools.remote-commands.catalog.open",
+      "title": "Open remote command catalog",
+      "subtitle": "Browse imported powertool command definitions",
+      "kind": "open",
+      "category": "Android Tools",
+      "execution": {
+        "type": "navigation",
+        "toolId": "remote-commands",
+        "routeId": "catalog"
+      }
+    },
+    {
+      "id": "android-tools.remote-commands.history.open",
+      "title": "Open remote command history",
+      "subtitle": "Show command execution history",
+      "kind": "open",
+      "category": "Android Tools",
+      "execution": {
+        "type": "navigation",
+        "toolId": "remote-commands",
+        "routeId": "history"
+      }
+    }
+  ]
+}

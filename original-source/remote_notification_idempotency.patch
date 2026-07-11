@@ -1,0 +1,114 @@
+diff --git a/py_modules/simple_http_notification_conf.py b/py_modules/simple_http_notification_conf.py
+--- a/py_modules/simple_http_notification_conf.py
++++ b/py_modules/simple_http_notification_conf.py
+@@ -44,7 +44,8 @@ add_schema = {
+         "channel": {"type": "string"},
+         "icon": {"type": "string"},
+         "id": {"type": "string"},
+-        "timestamp": {"type": "string"}
++        "timestamp": {"type": "string"},
++        "client_msg_id": {"type": "string"}
+     }
+ }
+ 
+diff --git a/py_modules/simple_http_notification_server.py b/py_modules/simple_http_notification_server.py
+--- a/py_modules/simple_http_notification_server.py
++++ b/py_modules/simple_http_notification_server.py
+@@ -284,8 +284,12 @@ def normalize_notification_timestamp(timestamp: str = "") -> str:
+     return datetime_class.now(timezone.utc).isoformat()
+ 
+ 
++def _dedupe_key(channel: str, client_msg_id: str) -> str:
++    return f"notification_dedupe:{cloud_server_port}:{channel}:{client_msg_id}"
++
++
+ def add_notification(message: str, channel: str, icon: str = "info",
+-                     notif_id: str = "", timestamp: str = "") -> None:
++                     notif_id: str = "", timestamp: str = "", client_msg_id: str = "") -> dict[str, Any]:
+     import uuid
+     event_timestamp = normalize_notification_timestamp(timestamp)
+     server_timestamp = datetime_class.now(timezone.utc).isoformat()
+@@ -293,6 +297,35 @@ def add_notification(message: str, channel: str, icon: str = "info",
+     # out-of-band) and server-generated /pull use the same id.
+     if not notif_id:
+         notif_id = uuid.uuid4().hex
++    if client_msg_id:
++        key = _dedupe_key(channel, client_msg_id)
++        dedupe_record = {
++            "message_id": notif_id,
++            "timestamp": event_timestamp,
++            "server_timestamp": server_timestamp,
++            "client_msg_id": client_msg_id,
++        }
++        inserted = redis_conn.set(key, json.dumps(dedupe_record), nx=True, ex=86400)
++        if not inserted:
++            existing_raw = redis_conn.get(key)
++            try:
++                existing = json.loads(
++                    existing_raw.decode("utf-8") if isinstance(existing_raw, bytes) else str(existing_raw)
++                )
++            except Exception:
++                existing = {}
++            existing_id = str(existing.get("message_id") or notif_id)
++            logger.info(
++                f"Duplicate notification skipped client_msg_id={client_msg_id[:12]} "
++                f"message_id={existing_id[:12]} channel={channel}"
++            )
++            return {
++                "status": "duplicate",
++                "stored_new": False,
++                "message_id": existing_id,
++                "client_msg_id": client_msg_id,
++            }
+     # 6-tuple: event timestamp for display/dedup, server timestamp for pull
+     # cursors. Legacy 4/5-tuples remain readable.
+     notification = (event_timestamp, message, [], icon, notif_id, server_timestamp)
+@@ -311,6 +344,12 @@ def add_notification(message: str, channel: str, icon: str = "info",
+             args=(channel, message, icon, event_timestamp, notif_id),
+             daemon=True,
+         ).start()
++    return {
++        "status": "ok",
++        "stored_new": True,
++        "message_id": notif_id,
++        "client_msg_id": client_msg_id,
++    }
+ 
+ 
+ def get_notification(channel: str, client_id: int) -> Tuple[datetime_class, str, List[int], str, str] | None:
+@@ -424,6 +463,7 @@ def unregister_up_endpoint() -> Tuple[Response, int]:
+ @app.route('/notification', methods=['POST'])
+ def receive_notification() -> Tuple[Response, int]:
+     data: Any | None = request.get_json()
++    result: dict[str, Any] = {"status": "ok"}
+     if data:
+         try:
+             jsonschema.validate(data, add_schema)
+@@ -432,11 +472,26 @@ def receive_notification() -> Tuple[Response, int]:
+             icon = data.get("icon", "info")
+             client_id = data.get("id", "")  # optional client-generated UUID
+             timestamp = data.get("timestamp", "")
+-            logger.debug(f"Received notification: {msg} from ip {request.remote_addr} id={client_id[:8] if client_id else 'none'}")
+-            add_notification(msg, channel, icon, notif_id=client_id, timestamp=timestamp)
++            client_msg_id = data.get("client_msg_id", "")
++            logger.info(
++                f"Received notification from ip {request.remote_addr} "
++                f"id={client_id[:12] if client_id else 'none'} "
++                f"client_msg_id={client_msg_id[:12] if client_msg_id else 'none'} "
++                f"channel={channel}"
++            )
++            result = add_notification(
++                msg,
++                channel,
++                icon,
++                notif_id=client_id,
++                timestamp=timestamp,
++                client_msg_id=client_msg_id,
++            )
+         except jsonschema.exceptions.ValidationError as e:
+             return jsonify({"error": e.message}), 400
+-    return jsonify({"status": "ok"}), 200
++    return jsonify(result), 200
+ 
+ 
+ @app.route('/sms', methods=['POST'])

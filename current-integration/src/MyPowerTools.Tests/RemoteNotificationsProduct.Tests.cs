@@ -1,0 +1,582 @@
+using MyPowerTools.Shell.Avalonia.Services;
+using MyPowerTools.Shell.Avalonia.ViewModels;
+using MyPowerTools.Shell.Avalonia.Views;
+
+namespace MyPowerTools.Tests;
+
+public sealed class RemoteNotificationsProductTests
+{
+    private static readonly string Root = FindRepositoryRoot();
+
+    [Fact]
+    public void Detail_window_title_hides_the_internal_default_channel()
+    {
+        var defaultMessage = new RemoteNotificationMessageViewModel(
+            Message("default-title", "message", DateTimeOffset.UtcNow));
+        var customMessage = new RemoteNotificationMessageViewModel(new RemoteNotificationRecord(
+            "custom-title",
+            "builds",
+            "message",
+            "codex",
+            DateTimeOffset.UtcNow.ToString("O")));
+
+        Assert.Equal("Remote notification", defaultMessage.DetailWindowTitle);
+        Assert.Equal("builds notification", customMessage.DetailWindowTitle);
+    }
+
+    [Fact]
+    public void Feed_preview_removes_the_repeated_topic_prefix()
+    {
+        var message = new RemoteNotificationMessageViewModel(
+            Message("preview", "[alpha] **Build complete**\n\nOpen the artifact.", DateTimeOffset.UtcNow));
+
+        Assert.Equal("alpha", message.Label);
+        Assert.Equal("**Build complete**\n\nOpen the artifact.", message.DisplayMessage);
+        Assert.StartsWith("[alpha]", message.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Markdown_renderer_preserves_links_tables_tasks_and_fenced_code()
+    {
+        var renderer = File.ReadAllText(Path.Combine(
+            Root,
+            "src",
+            "MyPowerTools.Shell.Avalonia",
+            "Views",
+            "MarkdownTextBlock.cs"));
+
+        Assert.Contains("HyperlinkButton", renderer, StringComparison.Ordinal);
+        Assert.Contains("TryParseTableRow", renderer, StringComparison.Ordinal);
+        Assert.Contains("TaskPattern", renderer, StringComparison.Ordinal);
+        Assert.Contains("TryParseFence", renderer, StringComparison.Ordinal);
+        Assert.Contains("SyntaxTokenPattern", renderer, StringComparison.Ordinal);
+        Assert.Contains("BareLinkPattern", renderer, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, 1000, 1120, 400, 0)]
+    [InlineData(40, 1000, 1120, 400, 0)]
+    [InlineData(100, 1000, 1120, 400, 220)]
+    [InlineData(700, 1000, 1120, 400, 720)]
+    public void Newest_first_feed_preserves_the_reading_anchor(
+        double previousOffset,
+        double previousExtent,
+        double currentExtent,
+        double viewport,
+        double expected)
+    {
+        Assert.Equal(
+            expected,
+            RemoteNotificationScrollAnchor.CalculateOffset(
+                previousOffset,
+                previousExtent,
+                currentExtent,
+                viewport));
+    }
+
+    [Fact]
+    public void Restored_history_uses_original_newest_first_feed_and_session_chip_filter()
+    {
+        var store = new FakeStore();
+        var snapshot = new RemoteNotificationsSnapshot(
+            [
+                Message("old", "[alpha] older message", DateTimeOffset.UtcNow.AddMinutes(-4)),
+                Message("new", "[beta] newest message", DateTimeOffset.UtcNow.AddMinutes(-2))
+            ],
+            ["beta", "alpha"],
+            null,
+            false);
+        var viewModel = new RemoteNotificationsViewModel(snapshot, store, new FakePoller());
+
+        Assert.Equal("new", viewModel.Messages[0].Id);
+        Assert.Equal("old", viewModel.Messages[1].Id);
+        Assert.Equal(["All", "beta", "alpha"], viewModel.Chips.Select(chip => chip.Label));
+        Assert.Equal("2 messages", viewModel.MessageCountText);
+
+        var alpha = viewModel.Chips.Single(chip => chip.Label == "alpha");
+        alpha.SelectCommand.Execute(null);
+
+        Assert.Equal("alpha", store.SavedFilter);
+        Assert.Equal("old", Assert.Single(viewModel.VisibleMessages).Id);
+        Assert.Equal("1 of 2 message", viewModel.MessageCountText);
+    }
+
+    [Fact]
+    public async Task Empty_pull_uses_the_original_idle_status_treatment()
+    {
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([], [], null, false),
+            new FakeStore(),
+            new FakePoller(new RemoteNotificationPullResult("idle", [], "")));
+
+        await viewModel.PollAsync();
+
+        Assert.Equal("Idle", viewModel.StatusText);
+        Assert.Equal("#9E9E9E", viewModel.StatusForeground);
+        Assert.Equal("#F0F0F0", viewModel.StatusBackground);
+    }
+
+    [Fact]
+    public async Task Polling_deduplicates_persists_and_marks_the_active_session_chip_unread()
+    {
+        var existing = Message("existing", "[alpha] existing", DateTimeOffset.UtcNow.AddMinutes(-3));
+        var incoming = Message("incoming", "[beta] incoming", DateTimeOffset.UtcNow.AddSeconds(-5));
+        var store = new FakeStore();
+        var poller = new FakePoller(new RemoteNotificationPullResult("ok", [existing, incoming], ""));
+        var toasts = new FakeToastPublisher();
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([existing], ["alpha"], null, false),
+            store,
+            poller,
+            toasts);
+
+        await viewModel.PollAsync();
+
+        Assert.Equal(2, viewModel.Messages.Count);
+        Assert.Equal("incoming", viewModel.Messages[0].Id);
+        Assert.Equal("2", viewModel.Fetched);
+        Assert.Equal("1", viewModel.Shown);
+        Assert.Equal("ok", viewModel.ConnectionState);
+        Assert.True(viewModel.Chips.Single(chip => chip.Label == "beta").IsUnread);
+        Assert.Equal("beta", store.SavedLabels[0]);
+        Assert.Equal(2, store.SavedMessages.Count);
+        Assert.Equal("incoming", Assert.Single(toasts.Published).MessageId);
+        Assert.Contains("incoming", store.SavedSeenIds);
+        Assert.Contains(RemoteNotificationsLegacyStore.FallbackId(incoming), store.SavedSeenIds);
+
+        viewModel.AcknowledgeMessage(viewModel.Messages[0]);
+        Assert.False(viewModel.Chips.Single(chip => chip.Label == "beta").IsUnread);
+    }
+
+    [Fact]
+    public async Task Persisted_seen_ring_drops_a_replayed_message_outside_the_visible_history()
+    {
+        var replay = Message("server-message-900", "[beta] replay", DateTimeOffset.UtcNow.AddSeconds(-2));
+        var toasts = new FakeToastPublisher();
+        var store = new FakeStore();
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([], [], null, false, ["server-message-900"]),
+            store,
+            new FakePoller(new RemoteNotificationPullResult("ok", [replay], "")),
+            toasts);
+
+        await viewModel.PollAsync();
+
+        Assert.Equal("0", viewModel.Shown);
+        Assert.Empty(viewModel.Messages);
+        Assert.Empty(toasts.Published);
+    }
+
+    [Fact]
+    public async Task Persistent_toggle_is_forwarded_to_the_single_accepted_windows_toast()
+    {
+        var incoming = Message("persistent-message", "[build] needs attention", DateTimeOffset.UtcNow.AddSeconds(-1));
+        var toasts = new FakeToastPublisher();
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([], [], null, true, []),
+            new FakeStore(),
+            new FakePoller(new RemoteNotificationPullResult("ok", [incoming, incoming], "")),
+            toasts);
+
+        await viewModel.PollAsync();
+
+        var published = Assert.Single(toasts.Published);
+        Assert.Equal("persistent-message", published.MessageId);
+        Assert.True(published.Persistent);
+        Assert.Equal("1", viewModel.Shown);
+    }
+
+    [Fact]
+    public void Original_fallback_id_and_seen_ring_limits_are_preserved()
+    {
+        var notification = new RemoteNotificationRecord(
+            "",
+            "default",
+            "[alpha] hello",
+            "codex",
+            "2026-07-11T00:00:00Z");
+        var ring = new RemoteNotificationSeenIdRing(
+            Enumerable.Range(0, 5100).Select(index => $"id-{index}"));
+
+        Assert.Equal("n4963c7b80bdb97f2f7966938", RemoteNotificationsLegacyStore.FallbackId(notification));
+        Assert.Equal(5000, ring.Count);
+        Assert.False(ring.Contains("id-99"));
+        Assert.True(ring.Contains("id-100"));
+        Assert.True(ring.Contains("id-5099"));
+    }
+
+    [Fact]
+    public void Toast_contract_maps_persistent_to_reminder_and_targets_the_exact_message()
+    {
+        var notification = Message("message/id 42", "[build] **Complete**\nOpen it.", DateTimeOffset.UtcNow);
+        var persistent = RemoteNotificationWindowsToastPublisher.BuildEnvelope(notification, notification.Id, persistent: true);
+        var transient = RemoteNotificationWindowsToastPublisher.BuildEnvelope(notification, notification.Id, persistent: false);
+        var xml = persistent.ToXml();
+
+        Assert.Equal("build", persistent.Title);
+        Assert.Equal("**Complete** Open it.", persistent.Body);
+        Assert.Equal("reminder", persistent.Scenario);
+        Assert.Equal("", transient.Scenario);
+        Assert.Equal("mypowertools://remote-notification?id=message%2Fid%2042", persistent.LaunchUri);
+        Assert.Contains("scenario=\"reminder\"", xml, StringComparison.Ordinal);
+        Assert.Contains("activationType=\"protocol\"", xml, StringComparison.Ordinal);
+        Assert.DoesNotContain("scenario=", transient.ToXml(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false, "")]
+    [InlineData(true, "reminder")]
+    public async Task Windows_publisher_sends_exactly_one_native_envelope_for_each_banner_mode(
+        bool persistent,
+        string expectedScenario)
+    {
+        var notification = Message("native/message 42", "[build] complete", DateTimeOffset.UtcNow);
+        var platform = new RecordingToastPlatform();
+        var publisher = new RemoteNotificationWindowsToastPublisher(platform);
+
+        var result = await publisher.PublishAsync(
+            notification,
+            notification.Id,
+            persistent);
+
+        Assert.True(result.Shown);
+        var envelope = Assert.Single(platform.Envelopes);
+        Assert.Equal(expectedScenario, envelope.Scenario);
+        Assert.Equal("native/message 42", envelope.MessageId);
+        Assert.Equal(
+            "mypowertools://remote-notification?id=native%2Fmessage%2042",
+            envelope.LaunchUri);
+    }
+
+    [Fact]
+    public void Native_windows_toast_abi_builds_a_real_notification_without_showing_a_banner()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var result = WindowsRemoteNotificationToastPlatform.ProbeRuntime();
+
+        Assert.True(result.Shown, result.Error);
+        Assert.Equal("ready", result.State);
+    }
+
+    [Fact]
+    public void Activation_protocol_recovers_the_exact_encoded_message_id()
+    {
+        var parsed = RemoteNotificationActivationProtocol.Parse(
+            ["--remote-notification-activation", "mypowertools://remote-notification?id=message%2Fid%2042"]);
+
+        Assert.NotNull(parsed);
+        Assert.Equal("message/id 42", parsed.MessageId);
+        Assert.Equal(
+            "message/id 42",
+            RemoteNotificationActivationProtocol.ParseLaunchUri(parsed.LaunchUri).MessageId);
+    }
+
+    [Fact]
+    public async Task Activation_pipe_forwards_the_exact_message_to_the_running_shell_endpoint()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var pipeName = $"MyPowerTools.RemoteNotificationActivation.Tests.{Guid.NewGuid():N}";
+        var received = new TaskCompletionSource<RemoteNotificationActivationRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var pipe = new RemoteNotificationActivationPipe(
+            request =>
+            {
+                received.TrySetResult(request);
+                return Task.CompletedTask;
+            },
+            pipeName);
+        pipe.Start();
+        var request = new RemoteNotificationActivationRequest(
+            "exact-message-42",
+            "mypowertools://remote-notification?id=exact-message-42");
+
+        var forwarded = await RemoteNotificationActivationPipe.TryForwardToRunningShellAsync(
+            request,
+            TimeSpan.FromSeconds(2),
+            pipeName: pipeName);
+        var delivered = await received.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(forwarded);
+        Assert.Equal(request, delivered);
+    }
+
+    [Fact]
+    public void Shell_instance_mutex_prevents_a_second_startup_owner()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var mutexName = $@"Local\MyPowerTools.Shell.Tests.{Guid.NewGuid():N}";
+        using var first = RemoteNotificationShellInstanceLock.Acquire(mutexName);
+        var secondAcquired = true;
+        Exception? contenderError = null;
+        var contender = new Thread(() =>
+        {
+            try
+            {
+                using var second = RemoteNotificationShellInstanceLock.Acquire(mutexName);
+                secondAcquired = second.Acquired;
+            }
+            catch (Exception exception)
+            {
+                contenderError = exception;
+            }
+        });
+        contender.Start();
+
+        Assert.True(first.Acquired);
+        Assert.True(contender.Join(TimeSpan.FromSeconds(5)));
+        Assert.Null(contenderError);
+        Assert.False(secondAcquired);
+    }
+
+    [Fact]
+    public void Remote_notifications_implementation_tracks_the_original_source_contract()
+    {
+        var store = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "RemoteNotificationsLegacyStore.cs"));
+        var viewModel = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.Shell.Avalonia", "ViewModels", "RemoteNotificationsViewModels.cs"));
+        var toast = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "RemoteNotificationToastPublisher.cs"));
+        var activation = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "RemoteNotificationActivationService.cs"));
+        var toastPlatform = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "WindowsRemoteNotificationToastPlatform.cs"));
+        var program = File.ReadAllText(Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia", "Program.cs"));
+        var app = File.ReadAllText(Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia", "App.cs"));
+        var mainWindowRoot = Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia");
+        var mainWindow = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(mainWindowRoot, "MainWindow*.cs")
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
+        var controller = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "ShellWorkspaceController.Tools.cs"));
+
+        Assert.Contains("MaximumMessages = 500", store, StringComparison.Ordinal);
+        Assert.Contains("MaximumRecentHashes = 200", store, StringComparison.Ordinal);
+        Assert.Contains("MaximumSeenMessageIds = 5000", store, StringComparison.Ordinal);
+        Assert.Contains("FallbackId", viewModel, StringComparison.Ordinal);
+        Assert.Contains("PublishAsync", viewModel, StringComparison.Ordinal);
+        Assert.Contains("persistent ? \"reminder\"", toast, StringComparison.Ordinal);
+        Assert.Contains("mypowertools://remote-notification?id=", toast, StringComparison.Ordinal);
+        Assert.Contains("MyPowerTools.RemoteNotificationActivation", activation, StringComparison.Ordinal);
+        Assert.Contains("_navigateAndOpen(request.MessageId)", activation, StringComparison.Ordinal);
+        Assert.Contains("WindowsToastAbi.Show", toastPlatform, StringComparison.Ordinal);
+        Assert.Contains("SetCurrentProcessExplicitAppUserModelID", toastPlatform, StringComparison.Ordinal);
+        Assert.Contains("TryForwardToRunningShellAsync", program, StringComparison.Ordinal);
+        Assert.Contains("RemoteNotificationShellInstanceLock.Acquire", program, StringComparison.Ordinal);
+        Assert.True(
+            program.IndexOf("--smoke", StringComparison.Ordinal) <
+            program.IndexOf("RemoteNotificationShellInstanceLock.Acquire", StringComparison.Ordinal));
+        Assert.Contains("RemoteNotificationActivationCoordinator", app, StringComparison.Ordinal);
+        Assert.Contains("mainWindow.OpenRemoteNotificationAsync", app, StringComparison.Ordinal);
+        Assert.Contains("mainWindow.FocusCommandPaletteAsync", app, StringComparison.Ordinal);
+        Assert.Contains("_workspaceOpened.Task", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("FocusCommandPaletteAsync", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("OpenRemoteNotificationAsync", controller, StringComparison.Ordinal);
+        Assert.Contains("ShowToolPageAsync(RemoteNotificationsToolId, \"inbox\")", controller, StringComparison.Ordinal);
+
+        var originalRoot = Path.Combine(Root, "..", "androidtools");
+        if (!Directory.Exists(originalRoot))
+        {
+            return;
+        }
+
+        var page1 = File.ReadAllText(Path.Combine(originalRoot, "powertool", "page1.py"));
+        var qt = File.ReadAllText(Path.Combine(originalRoot, "qt.py"));
+        var windowsNotifications = File.ReadAllText(Path.Combine(originalRoot, "powertool", "windows_notifications.py"));
+        Assert.Contains("MAX_SEEN_MESSAGE_IDS = 5000", page1, StringComparison.Ordinal);
+        Assert.Contains("accepted_msg_signal", qt, StringComparison.Ordinal);
+        Assert.Contains("toast_launch_for_message", qt, StringComparison.Ordinal);
+        Assert.Contains("scenario=\"{html.escape(scenario", windowsNotifications, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Sync_errors_use_a_compact_summary_with_expandable_technical_details_and_retry()
+    {
+        const string traceback = "Traceback (most recent call last):\n  File \"pull.py\", line 4\nHttpRequestException: Connection reset by peer";
+        var poller = new FakePoller(
+            new RemoteNotificationPullResult("error", [], traceback),
+            new RemoteNotificationPullResult("idle", [], ""));
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([], [], null, false),
+            new FakeStore(),
+            poller);
+
+        await viewModel.PollAsync();
+
+        Assert.True(viewModel.HasSyncError);
+        Assert.Equal("Notifications could not sync", viewModel.ErrorTitle);
+        Assert.Contains("Connection reset by peer", viewModel.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Traceback", viewModel.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Traceback", viewModel.TechnicalErrorDetails, StringComparison.Ordinal);
+        Assert.True(viewModel.RetryCommand.CanExecute(null));
+
+        viewModel.ToggleErrorDetailsCommand.Execute(null);
+        Assert.True(viewModel.IsErrorDetailsExpanded);
+        Assert.Equal("Hide details", viewModel.ErrorDetailsActionLabel);
+
+        await viewModel.RetryAsync();
+
+        Assert.Equal(2, poller.CallCount);
+        Assert.Equal("idle", viewModel.ConnectionState);
+        Assert.False(viewModel.HasSyncError);
+        Assert.False(viewModel.IsErrorDetailsExpanded);
+        Assert.Equal("No new messages", viewModel.SyncResultText);
+    }
+
+    [Fact]
+    public void Persistent_and_clear_actions_write_the_legacy_Page1_store_contract()
+    {
+        var store = new FakeStore();
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot(
+                [Message("one", "[alpha] one", DateTimeOffset.UtcNow)],
+                ["alpha"],
+                null,
+                false),
+            store,
+            new FakePoller());
+
+        viewModel.PersistentWindowsToasts = true;
+        viewModel.ClearMessages();
+
+        Assert.True(store.SavedPersistent);
+        Assert.True(store.WasCleared);
+        Assert.Empty(viewModel.Messages);
+        Assert.Equal("Waiting for notifications…", viewModel.EmptyOverlayText);
+    }
+
+    private static RemoteNotificationRecord Message(string id, string body, DateTimeOffset timestamp)
+    {
+        return new RemoteNotificationRecord(
+            id,
+            "default",
+            body,
+            "codex",
+            timestamp.ToUniversalTime().ToString("O"));
+    }
+
+    private sealed class FakeStore : IRemoteNotificationsStore
+    {
+        public string? SavedFilter { get; private set; }
+        public IReadOnlyList<string> SavedLabels { get; private set; } = [];
+        public IReadOnlyList<RemoteNotificationRecord> SavedMessages { get; private set; } = [];
+        public bool SavedPersistent { get; private set; }
+        public bool WasCleared { get; private set; }
+        public IReadOnlyList<string> SavedSeenIds { get; private set; } = [];
+
+        public RemoteNotificationsSnapshot Load() => new([], [], null, false);
+
+        public void SaveMessages(IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
+        {
+            SavedMessages = messagesOldestFirst;
+        }
+
+        public void SaveFilter(string? label)
+        {
+            SavedFilter = label;
+        }
+
+        public void SaveKnownLabels(IReadOnlyList<string> labels)
+        {
+            SavedLabels = labels.ToArray();
+        }
+
+        public void SavePersistentWindowsToasts(bool enabled)
+        {
+            SavedPersistent = enabled;
+        }
+
+        public void SaveSeenMessageIds(IReadOnlyList<string> messageIdsOldestFirst)
+        {
+            SavedSeenIds = messageIdsOldestFirst.ToArray();
+        }
+
+        public void ClearMessages()
+        {
+            WasCleared = true;
+        }
+    }
+
+    private sealed class FakeToastPublisher : IRemoteNotificationToastPublisher
+    {
+        public List<(string MessageId, bool Persistent)> Published { get; } = [];
+
+        public Task<RemoteNotificationToastPublishResult> PublishAsync(
+            RemoteNotificationRecord notification,
+            string messageId,
+            bool persistent,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Published.Add((messageId, persistent));
+            return Task.FromResult(new RemoteNotificationToastPublishResult(true, "shown"));
+        }
+    }
+
+    private sealed class RecordingToastPlatform : IRemoteNotificationToastPlatform
+    {
+        public List<RemoteNotificationToastEnvelope> Envelopes { get; } = [];
+
+        public RemoteNotificationToastPublishResult Show(RemoteNotificationToastEnvelope envelope)
+        {
+            Envelopes.Add(envelope);
+            return new RemoteNotificationToastPublishResult(true, "shown");
+        }
+
+        public bool ClearHistory() => true;
+    }
+
+    private sealed class FakePoller : IRemoteNotificationPoller
+    {
+        private readonly Queue<RemoteNotificationPullResult> _results;
+        private RemoteNotificationPullResult _lastResult;
+
+        public FakePoller(params RemoteNotificationPullResult[] results)
+        {
+            _results = new Queue<RemoteNotificationPullResult>(results);
+            _lastResult = results.LastOrDefault() ?? new RemoteNotificationPullResult("idle", [], "");
+        }
+
+        public int CallCount { get; private set; }
+
+        public Task<RemoteNotificationPullResult> PullAsync(string since, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            if (_results.Count > 0)
+            {
+                _lastResult = _results.Dequeue();
+            }
+
+            return Task.FromResult(_lastResult);
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "MyPowerTools.slnx")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("MyPowerTools repository root was not found.");
+    }
+}

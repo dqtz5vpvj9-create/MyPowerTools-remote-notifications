@@ -1,0 +1,306 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Windows.Input;
+using MyPowerTools.Shell.Avalonia.Services;
+
+namespace MyPowerTools.Shell.Avalonia.ViewModels;
+
+public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewModel
+{
+    private readonly IRemoteNotificationsStore _store;
+    private readonly IRemoteNotificationPoller _poller;
+    private readonly IRemoteNotificationToastPublisher _toastPublisher;
+    private readonly RemoteNotificationSeenIdRing _seenIds;
+    private readonly HashSet<string> _unreadLabels = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _pollGate = new(1, 1);
+    private readonly AsyncRelayCommand _retryCommand;
+    private string? _filterLabel;
+    private bool _persistentWindowsToasts;
+    private string _connectionState = "starting";
+    private string _lastPoll = "never";
+    private string _fetched = "0";
+    private string _shown = "0";
+    private string _latest = "never";
+    private string _lastError = "none";
+    private bool _isErrorDetailsExpanded;
+    private string _waterline;
+
+    public RemoteNotificationsViewModel(
+        RemoteNotificationsSnapshot snapshot,
+        IRemoteNotificationsStore? store = null,
+        IRemoteNotificationPoller? poller = null,
+        IRemoteNotificationToastPublisher? toastPublisher = null)
+        : base(
+            "Remote Notifications",
+            "Signed messages are synchronized automatically and kept in your local notification history.",
+            ToolProductState.Ready)
+    {
+        _store = store ?? new RemoteNotificationsLegacyStore();
+        _poller = poller ?? new RemoteNotificationHttpPoller();
+        _toastPublisher = toastPublisher ?? RemoteNotificationToastPublisherFactory.CreateForCurrentRuntime();
+        _filterLabel = snapshot.FilterLabel;
+        _persistentWindowsToasts = snapshot.PersistentWindowsToasts;
+        KnownLabels = new ObservableCollection<string>(snapshot.KnownLabels);
+        Messages = new ObservableCollection<RemoteNotificationMessageViewModel>(
+            snapshot.MessagesOldestFirst.Reverse().Select(message => new RemoteNotificationMessageViewModel(message)));
+        _seenIds = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
+        foreach (var message in Messages.Reverse())
+        {
+            _seenIds.TryAccept(message.Id, message.FallbackId);
+        }
+        Chips = new ObservableCollection<RemoteNotificationLabelChipViewModel>();
+        _retryCommand = new AsyncRelayCommand(RetryAsync, () => !IsPolling);
+        RetryCommand = _retryCommand;
+        ToggleErrorDetailsCommand = new AsyncRelayCommand(() =>
+        {
+            IsErrorDetailsExpanded = !IsErrorDetailsExpanded;
+            return Task.CompletedTask;
+        });
+        _waterline = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        RebuildChips();
+        NotifyMessageViewChanged();
+    }
+
+    public Task RetryAsync()
+    {
+        return PollAsync();
+    }
+
+    public async Task PollAsync(CancellationToken cancellationToken = default)
+    {
+        if (!await _pollGate.WaitAsync(0, cancellationToken).ConfigureAwait(true))
+        {
+            return;
+        }
+
+        try
+        {
+            LastError = "none";
+            ConnectionState = "running";
+            var pollTime = DateTimeOffset.Now.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
+            var result = await _poller.PullAsync(_waterline, cancellationToken).ConfigureAwait(true);
+            LastPoll = pollTime;
+            Fetched = result.Notifications.Count.ToString(CultureInfo.InvariantCulture);
+
+            var saneNotifications = result.Notifications
+                .Where(IsSaneNotification)
+                .OrderBy(message => ParseSortTime(message.ServerTimestamp.Length > 0 ? message.ServerTimestamp : message.Timestamp))
+                .ToArray();
+            var shown = 0;
+            foreach (var notification in saneNotifications)
+            {
+                var id = RemoteNotificationsLegacyStore.StableId(notification);
+                var fallbackId = RemoteNotificationsLegacyStore.FallbackId(notification);
+                if (!_seenIds.TryAccept(id, fallbackId))
+                {
+                    continue;
+                }
+
+                var message = new RemoteNotificationMessageViewModel(notification);
+                Messages.Insert(0, message);
+                TouchLabel(message.Label);
+                _store.SaveSeenMessageIds(_seenIds.OldestFirst);
+                PersistMessages();
+                _ = await _toastPublisher.PublishAsync(
+                    notification,
+                    id,
+                    PersistentWindowsToasts,
+                    cancellationToken).ConfigureAwait(true);
+                shown++;
+            }
+
+            while (Messages.Count > RemoteNotificationsLegacyStore.MaximumMessages)
+            {
+                var removed = Messages[^1];
+                Messages.RemoveAt(Messages.Count - 1);
+            }
+
+            Shown = shown.ToString(CultureInfo.InvariantCulture);
+            var latestNotification = saneNotifications.LastOrDefault();
+            if (latestNotification is not null)
+            {
+                Latest = FormatDisplayTimestamp(latestNotification.Timestamp);
+                var waterline = latestNotification.ServerTimestamp.Length > 0
+                    ? latestNotification.ServerTimestamp
+                    : latestNotification.Timestamp;
+                if (RemoteNotificationMessageViewModel.TryParseServerTimestamp(waterline, out var parsed))
+                {
+                    _waterline = parsed.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+                }
+            }
+
+            LastError = result.Error;
+            ConnectionState = result.State;
+            foreach (var message in Messages)
+            {
+                message.RefreshRelativeTime();
+            }
+
+            NotifyMessageViewChanged();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            LastPoll = DateTimeOffset.Now.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
+            Fetched = "0";
+            Shown = "0";
+            LastError = exception.Message;
+            ConnectionState = "error";
+        }
+        finally
+        {
+            _pollGate.Release();
+        }
+    }
+
+    public void ClearMessages()
+    {
+        Messages.Clear();
+        _store.ClearMessages();
+        NotifyMessageViewChanged();
+    }
+
+    public void AcknowledgeMessage(RemoteNotificationMessageViewModel message)
+    {
+        if (_unreadLabels.Remove(message.Label))
+        {
+            RebuildChips();
+        }
+    }
+
+    public RemoteNotificationMessageViewModel? FindMessageById(string messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId))
+        {
+            return null;
+        }
+
+        return Messages.FirstOrDefault(message =>
+            string.Equals(message.Id, messageId, StringComparison.Ordinal) ||
+            string.Equals(message.FallbackId, messageId, StringComparison.Ordinal));
+    }
+
+    private Task SelectFilterAsync(string? label)
+    {
+        if (label is not null)
+        {
+            _unreadLabels.Remove(label);
+        }
+
+        _filterLabel = label;
+        _store.SaveFilter(label);
+        RebuildChips();
+        NotifyMessageViewChanged();
+        return Task.CompletedTask;
+    }
+
+    private void TouchLabel(string label)
+    {
+        var index = KnownLabels.IndexOf(label);
+        if (index >= 0)
+        {
+            KnownLabels.RemoveAt(index);
+        }
+
+        KnownLabels.Insert(0, label);
+        _unreadLabels.Add(label);
+        _store.SaveKnownLabels(KnownLabels);
+        RebuildChips();
+    }
+
+    private void RebuildChips()
+    {
+        Chips.Clear();
+        if (KnownLabels.Count == 0)
+        {
+            OnPropertyChanged(nameof(HasLabels));
+            return;
+        }
+
+        Chips.Add(new RemoteNotificationLabelChipViewModel(
+            "All",
+            null,
+            _filterLabel is null,
+            false,
+            SelectFilterAsync));
+        foreach (var label in KnownLabels)
+        {
+            Chips.Add(new RemoteNotificationLabelChipViewModel(
+                label,
+                label,
+                string.Equals(label, _filterLabel, StringComparison.Ordinal),
+                _unreadLabels.Contains(label),
+                SelectFilterAsync));
+        }
+
+        OnPropertyChanged(nameof(HasLabels));
+    }
+
+    private void PersistMessages()
+    {
+        _store.SaveMessages(Messages.Reverse().Select(message => message.Source).ToArray());
+    }
+
+    private void NotifyMessageViewChanged()
+    {
+        OnPropertyChanged(nameof(TotalCount));
+        OnPropertyChanged(nameof(VisibleMessages));
+        OnPropertyChanged(nameof(HasVisibleMessages));
+        OnPropertyChanged(nameof(ShowsEmptyOverlay));
+        OnPropertyChanged(nameof(EmptyOverlayText));
+        OnPropertyChanged(nameof(MessageCountText));
+    }
+
+    private static bool IsSaneNotification(RemoteNotificationRecord notification)
+    {
+        var timestamp = notification.ServerTimestamp.Length > 0
+            ? notification.ServerTimestamp
+            : notification.Timestamp;
+        return RemoteNotificationMessageViewModel.TryParseServerTimestamp(timestamp, out var parsed) &&
+               parsed <= DateTimeOffset.UtcNow.AddMinutes(2);
+    }
+
+    private static DateTimeOffset ParseSortTime(string timestamp)
+    {
+        return RemoteNotificationMessageViewModel.TryParseServerTimestamp(timestamp, out var parsed)
+            ? parsed
+            : DateTimeOffset.MinValue;
+    }
+
+    private static string FormatDisplayTimestamp(string timestamp)
+    {
+        return RemoteNotificationMessageViewModel.TryParseServerTimestamp(timestamp, out var parsed)
+            ? parsed.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture)
+            : string.IsNullOrWhiteSpace(timestamp) ? "never" : timestamp;
+    }
+
+    private static string BuildErrorSummary(string state, string error)
+    {
+        if (string.Equals(state, "auth", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Check the device signing key, then retry synchronization.";
+        }
+
+        var meaningfulLine = error
+            .Replace('\r', '\n')
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Reverse()
+            .FirstOrDefault(line =>
+                !line.StartsWith("Traceback", StringComparison.OrdinalIgnoreCase) &&
+                !line.StartsWith("File ", StringComparison.OrdinalIgnoreCase) &&
+                !line.StartsWith("^", StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(meaningfulLine) ||
+            string.Equals(meaningfulLine, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Check the connection and try again.";
+        }
+
+        const int maximumLength = 180;
+        return meaningfulLine.Length <= maximumLength
+            ? meaningfulLine
+            : $"{meaningfulLine[..(maximumLength - 1)]}…";
+    }
+}

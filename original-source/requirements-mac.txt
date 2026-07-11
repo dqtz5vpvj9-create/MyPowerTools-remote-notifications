@@ -1,0 +1,13 @@
+# Minimal deps to run `python qt.py` on macOS.
+# pywifi is intentionally omitted — it has no macOS backend and the wifi
+# tray status was stripped out of qt.py for this reason.
+
+PyQt6
+psutil
+requests
+PyYAML
+jsonschema
+cryptography
+markdown-it-py[linkify]
+mdit-py-plugins
+Pygments

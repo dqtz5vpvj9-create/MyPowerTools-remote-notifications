@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "commands": [
+    {
+      "id": "android-tools.process-monitor.open",
+      "title": "Open process monitor",
+      "subtitle": "Navigate to monitored process state",
+      "kind": "open",
+      "category": "Android Tools",
+      "execution": {
+        "type": "navigation",
+        "toolId": "process-monitor",
+        "routeId": "watch"
+      }
+    },
+    {
+      "id": "android-tools.process-monitor.logs.tail",
+      "title": "Show process monitor logs",
+      "subtitle": "Open latest process monitor logs",
+      "kind": "open",
+      "category": "Android Tools",
+      "execution": {
+        "type": "navigation",
+        "toolId": "process-monitor",
+        "routeId": "diagnostics"
+      }
+    }
+  ]
+}
