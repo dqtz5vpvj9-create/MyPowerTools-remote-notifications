@@ -49,10 +49,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $runtimeRoot = Join-Path $OutputRoot 'windows\x64'
-$runtimeArguments = @('build', $runtimeProject) + $commonProperties + "/p:ModuleRuntimeRoot=$runtimeRoot"
+$runtimeArguments = @(
+    'publish', $runtimeProject,
+    '-c', $Configuration,
+    '-r', 'win-x64',
+    '--self-contained', 'true',
+    '--output', $runtimeRoot,
+    "/p:MyPowerToolsRepoRoot=$MyPowerToolsRepoRoot",
+    '/p:DebugType=None',
+    '/p:DebugSymbols=false'
+)
 & dotnet @runtimeArguments
 if ($LASTEXITCODE -ne 0) {
-    throw "Runtime build failed with exit code $LASTEXITCODE"
+    throw "Self-contained Windows runtime publish failed with exit code $LASTEXITCODE"
 }
 
 Write-Host $OutputRoot
