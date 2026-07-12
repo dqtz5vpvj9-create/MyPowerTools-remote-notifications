@@ -6,7 +6,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <ModuleRuntimeRoot>$(MSBuildProjectDirectory)\..\..\modules\android-tools-suite\windows\x64</ModuleRuntimeRoot>
+    <MyPowerToolsRepoRoot Condition="'$(MyPowerToolsRepoRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..\..'))</MyPowerToolsRepoRoot>
+    <ModuleRuntimeRoot Condition="'$(ModuleRuntimeRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..\artifacts\package\android-tools-suite\windows\x64</ModuleRuntimeRoot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,9 +16,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AndroidTools.MyPowerTools\AndroidTools.MyPowerTools.csproj" />
-    <ProjectReference Include="..\MyPowerTools.Protocol\MyPowerTools.Protocol.csproj" />
-    <ProjectReference Include="..\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
+    <ProjectReference Include="$(MyPowerToolsRepoRoot)\src\MyPowerTools.Protocol\MyPowerTools.Protocol.csproj" />
+    <ProjectReference Include="$(MyPowerToolsRepoRoot)\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
   </ItemGroup>
+
+  <Target Name="ValidateMyPowerToolsRepoRoot" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(MyPowerToolsRepoRoot)\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj')" Text="MyPowerToolsRepoRoot must point to a MyPowerTools checkout." />
+  </Target>
 
   <Target Name="CopyPowertooldToPackage" AfterTargets="Build">
     <MakeDir Directories="$(ModuleRuntimeRoot)" />
