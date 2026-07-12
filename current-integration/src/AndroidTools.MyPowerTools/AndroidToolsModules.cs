@@ -1543,6 +1543,17 @@ public sealed class AndroidToolsSharedRuntime
     private static string ResolvePackageRoot()
     {
         var assemblyDirectory = Path.GetDirectoryName(typeof(AndroidToolsSharedRuntime).Assembly.Location) ?? AppContext.BaseDirectory;
+        var directory = new DirectoryInfo(assemblyDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "package.json")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
         var repoRoot = FindRepositoryRoot(assemblyDirectory);
         if (repoRoot is not null)
         {
@@ -2236,4 +2247,3 @@ internal static class StringLineExtensions
         return end - start;
     }
 }
-
