@@ -1,32 +1,23 @@
-<!-- mypowertools-materialized-source -->
-# MyPowerTools tool source: {{TOOL_ID}}
+# Remote Notifications for MyPowerTools
 
-This local development repository was materialized from
-`artifacts/source-bundle/tools/{{TOOL_ID}}`.
+This repository is the active source for the Remote Notifications product and
+currently owns the shared AndroidTools suite adapter used by the two paused
+Remote Commands and Process Monitor modules.
 
-Committed snapshot content:
+- `original-source/` preserves the current Python/PyQt implementation.
+- `current-integration/` contains the MyPowerTools adapter, package manifests,
+  native product UI source, and the `powertoold` runtime.
+- `build.ps1` builds the adapter and runtime into
+  `artifacts/package/android-tools-suite`.
+- `tool-release.json` defines the suite build output consumed by MyPowerTools.
 
-- `original-source/`: captured original tool source;
-- `current-integration/`: current MyPowerTools module, product UI, service, and related test source;
-- `source-map.json`: source commit, dirty-state, and snapshot mapping;
-- `README.md`: local materialization and remote migration instructions.
-
-## Local submodule URL
-
-The initial superproject URL is local to this machine:
-
-```text
-{{LOCAL_FILE_URL}}
-```
-
-After this repository is published, run the following commands from the
-MyPowerTools superproject and commit the resulting `.gitmodules` update:
+Build from a MyPowerTools checkout:
 
 ```powershell
-git config -f .gitmodules submodule.tools/{{TOOL_ID}}.url <remote-url>
-git submodule sync -- tools/{{TOOL_ID}}
-git add .gitmodules
+pwsh.exe -NoLogo -NoProfile -NonInteractive -File .\build.ps1 `
+  -MyPowerToolsRepoRoot C:\path\to\MyPowerTools
 ```
 
-The materialization script preserves a URL that has already been changed to a
-remote location and does not contact that remote.
+The adapter depends on the MyPowerTools host SDK projects through the explicit
+`MyPowerToolsRepoRoot` MSBuild property. The preserved Python application remains
+independently runnable from `original-source/` with its own requirements.
