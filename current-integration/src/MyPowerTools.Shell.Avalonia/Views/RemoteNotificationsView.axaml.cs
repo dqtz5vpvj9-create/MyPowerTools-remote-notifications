@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using MyPowerTools.RemoteNotifications.Configuration;
 using MyPowerTools.Shell.Avalonia.ViewModels;
 
 namespace MyPowerTools.Shell.Avalonia.Views;
@@ -22,7 +23,10 @@ public sealed partial class RemoteNotificationsView : UserControl
     public RemoteNotificationsView()
     {
         AvaloniaXamlLoader.Load(this);
-        _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _pollTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(RemoteNotificationSettings.DefaultPollIntervalSeconds)
+        };
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -76,6 +80,8 @@ public sealed partial class RemoteNotificationsView : UserControl
 
         _subscribedViewModel = viewModel;
         viewModel.Messages.CollectionChanged += OnMessagesCollectionChanged;
+        viewModel.PollingConfigurationChanged += OnPollingConfigurationChanged;
+        UpdatePollInterval(viewModel);
     }
 
     private void UnsubscribeFromMessageChanges()
@@ -83,8 +89,22 @@ public sealed partial class RemoteNotificationsView : UserControl
         if (_subscribedViewModel is not null)
         {
             _subscribedViewModel.Messages.CollectionChanged -= OnMessagesCollectionChanged;
+            _subscribedViewModel.PollingConfigurationChanged -= OnPollingConfigurationChanged;
             _subscribedViewModel = null;
         }
+    }
+
+    private void OnPollingConfigurationChanged(object? sender, EventArgs e)
+    {
+        if (sender is RemoteNotificationsViewModel viewModel)
+        {
+            UpdatePollInterval(viewModel);
+        }
+    }
+
+    private void UpdatePollInterval(RemoteNotificationsViewModel viewModel)
+    {
+        _pollTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(viewModel.PollIntervalSeconds, 5, 3600));
     }
 
     private void OnMessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

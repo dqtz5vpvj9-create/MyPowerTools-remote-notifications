@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using MyPowerTools.Protocol;
 using MyPowerTools.Abstractions;
+using MyPowerTools.RemoteNotifications.Configuration;
 
 namespace AndroidTools.MyPowerTools;
 
@@ -362,22 +363,28 @@ public sealed class AndroidToolsRemoteCommandsModule : AndroidToolsModuleBase
 
 public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
 {
-    private JsonObject? _settings;
+    private readonly IRemoteNotificationSettingsStore _productSettings = new RemoteNotificationSettingsStore();
 
     public override string Id => "android-tools.notifications";
     public override string DisplayName => "Remote Notifications";
 
     public override ValueTask<ModuleStatusSnapshot> GetStatusAsync(CancellationToken cancellationToken)
     {
+        var settings = _productSettings.Load();
         var endpoint = CurrentEndpoint();
+        var keyAvailable = File.Exists(settings.ExpandedPrivateKeyPath);
         var checks = new[]
         {
             new HealthCheckSnapshot("notification.config", "Notification endpoint config", endpoint.Found, endpoint.Message),
-            new HealthCheckSnapshot("notification.secret", "SSH request signing", endpoint.Found && Shared.LegacySshKeyExists(), Shared.LegacySshKeyExists() ? "SSH signing key is available." : "SSH signing key was not found; server pull will report auth failure."),
+            new HealthCheckSnapshot("notification.secret", "SSH request signing", endpoint.Found && keyAvailable, keyAvailable ? "Configured SSH signing key is available." : $"SSH signing key was not found at {settings.PrivateKeyPath}."),
             new HealthCheckSnapshot("notification.history", "Local notification history", Shared.NotificationHistoryExists(), Shared.NotificationHistoryExists() ? "Legacy notification history is available." : "No legacy notification history was discovered.")
         };
 
-        return ValueTask.FromResult(Status(endpoint.Found ? "running" : "degraded", endpoint.Message, checks));
+        var healthy = endpoint.Found && keyAvailable;
+        var message = healthy
+            ? $"{endpoint.Message} Signed pulls use channel '{settings.Channel}' every {settings.PollIntervalSeconds} seconds."
+            : keyAvailable ? endpoint.Message : $"SSH signing key was not found at {settings.PrivateKeyPath}.";
+        return ValueTask.FromResult(Status(healthy ? "running" : "degraded", message, checks));
     }
 
     public override ValueTask<IReadOnlyList<MptCommandDescriptor>> ListCommandsAsync(CancellationToken cancellationToken)
@@ -395,8 +402,11 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
     {
         return request.CommandId switch
         {
-            "android-tools.notifications.server.check" => Succeeded(request, (await Shared.CheckNotificationServerAsync(CurrentEndpoint(), cancellationToken)).ToJsonString()),
-            "android-tools.notifications.inbox.summary" => Succeeded(request, Shared.NotificationInboxSummary(CurrentEndpoint()).ToJsonString()),
+            "android-tools.notifications.server.check" => Succeeded(request, (await Shared.CheckNotificationServerAsync(
+                CurrentEndpoint(),
+                _productSettings.Load().Channel,
+                cancellationToken)).ToJsonString()),
+            "android-tools.notifications.inbox.summary" => Succeeded(request, Shared.NotificationInboxSummary(CurrentEndpoint(), _productSettings.Load().ExpandedPrivateKeyPath).ToJsonString()),
             "android-tools.notifications.test-event" => Succeeded(request, new JsonObject
             {
                 ["moduleId"] = Id,
@@ -412,9 +422,12 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
     {
         await Task.CompletedTask;
         var seq = Math.Max(1UL, cursor.LastEventSeq);
-        var pollInterval = TimeSpan.FromSeconds(Math.Clamp(SettingsJson.ReadInt(CurrentSettings(), "pollIntervalSeconds") ?? 30, 5, 3600));
+        var pollInterval = TimeSpan.FromSeconds(Math.Clamp(
+            SettingsJson.ReadInt(CurrentSettings(), "pollIntervalSeconds") ?? RemoteNotificationSettings.DefaultPollIntervalSeconds,
+            5,
+            3600));
         var endpoint = CurrentEndpoint();
-        var inbox = Shared.NotificationInboxSummary(endpoint);
+        var inbox = Shared.NotificationInboxSummary(endpoint, _productSettings.Load().ExpandedPrivateKeyPath);
         var fingerprint = $"{endpoint.Found}|{endpoint.Message}|{inbox.ToJsonString()}";
         if (cursor.LastEventSeq < 1)
         {
@@ -437,7 +450,7 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
         {
             await Task.Delay(pollInterval, cancellationToken);
             endpoint = CurrentEndpoint();
-            inbox = Shared.NotificationInboxSummary(endpoint);
+            inbox = Shared.NotificationInboxSummary(endpoint, _productSettings.Load().ExpandedPrivateKeyPath);
             var nextFingerprint = $"{endpoint.Found}|{endpoint.Message}|{inbox.ToJsonString()}";
             if (string.Equals(nextFingerprint, fingerprint, StringComparison.Ordinal))
             {
@@ -473,7 +486,9 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
             "serverHost": { "type": "string" },
             "serverPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
             "defaultChannel": { "type": "string", "default": "default" },
-            "pollIntervalSeconds": { "type": "integer", "minimum": 5, "maximum": 3600, "default": 30 },
+            "pollIntervalSeconds": { "type": "integer", "minimum": 5, "maximum": 3600, "default": 5 },
+            "privateKeyPath": { "type": "string", "default": "~/.ssh/id_ed25519" },
+            "keepWindowsBanners": { "type": "boolean", "default": false },
             "tagFilter": { "type": "array", "items": { "type": "string" } }
           }
         }
@@ -487,39 +502,64 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
 
     public override ValueTask<SettingsSnapshotDocument> ApplySettingsAsync(SettingsSnapshotDocument snapshot, CancellationToken cancellationToken)
     {
-        _settings = SettingsJson.Merge(DefaultNotificationSettings(Shared.LoadNotificationEndpoint()), snapshot.Values);
-        return ValueTask.FromResult(snapshot with { Values = (JsonObject)_settings.DeepClone() });
+        var current = _productSettings.Load();
+        var candidate = new RemoteNotificationSettings(
+            SettingsJson.ReadString(snapshot.Values, "serverProtocol") ?? current.Protocol,
+            SettingsJson.ReadString(snapshot.Values, "serverHost") ?? current.Host,
+            SettingsJson.ReadInt(snapshot.Values, "serverPort") ?? current.Port,
+            SettingsJson.ReadString(snapshot.Values, "defaultChannel") ?? current.Channel,
+            SettingsJson.ReadInt(snapshot.Values, "pollIntervalSeconds") ?? current.PollIntervalSeconds,
+            SettingsJson.ReadString(snapshot.Values, "privateKeyPath") ?? current.PrivateKeyPath,
+            ReadBoolean(snapshot.Values, "keepWindowsBanners", current.KeepWindowsBanners));
+        var validation = candidate.Validate();
+        if (!validation.IsValid || validation.Settings is null)
+        {
+            throw new ArgumentException(validation.Error, nameof(snapshot));
+        }
+
+        _productSettings.Save(validation.Settings);
+        var values = DefaultNotificationSettings(validation.Settings);
+        return ValueTask.FromResult(snapshot with { Values = values });
     }
 
     private JsonObject CurrentSettings()
     {
-        return _settings ?? DefaultNotificationSettings(Shared.LoadNotificationEndpoint());
+        return DefaultNotificationSettings(_productSettings.Load());
     }
 
     private NotificationEndpoint CurrentEndpoint()
     {
-        var settings = CurrentSettings();
-        var protocol = SettingsJson.ReadString(settings, "serverProtocol") ?? "https";
-        var host = SettingsJson.ReadString(settings, "serverHost") ?? "";
-        var port = SettingsJson.ReadInt(settings, "serverPort") ?? 0;
-        return string.IsNullOrWhiteSpace(host) || port <= 0
-            ? NotificationEndpoint.Missing(SettingsJson.ReadString(settings, "configSourceMessage") ?? "Notification endpoint is not configured in Host settings or package-shared config.")
-            : new NotificationEndpoint(true, protocol, host, port, $"Endpoint {protocol}://{host}:{port} imported from Host settings.");
+        var settings = _productSettings.Load();
+        var validation = settings.Validate();
+        return !validation.IsValid
+            ? NotificationEndpoint.Missing(validation.Error)
+            : new NotificationEndpoint(true, settings.Protocol, settings.Host, settings.Port, $"Endpoint {settings.Endpoint} loaded from Remote Notifications settings.");
     }
 
-    private static JsonObject DefaultNotificationSettings(NotificationEndpoint endpoint)
+    private static JsonObject DefaultNotificationSettings(RemoteNotificationSettings settings)
     {
         return new JsonObject
         {
             ["enabled"] = true,
-            ["serverProtocol"] = endpoint.Protocol,
-            ["serverHost"] = endpoint.Host,
-            ["serverPort"] = endpoint.Port,
-            ["configSourceMessage"] = endpoint.Message,
-            ["defaultChannel"] = "default",
-            ["pollIntervalSeconds"] = 30,
+            ["serverProtocol"] = settings.Protocol,
+            ["serverHost"] = settings.Host,
+            ["serverPort"] = settings.Port,
+            ["configSourceMessage"] = $"Loaded from {ProductSettingsPath}",
+            ["defaultChannel"] = settings.Channel,
+            ["pollIntervalSeconds"] = settings.PollIntervalSeconds,
+            ["privateKeyPath"] = settings.PrivateKeyPath,
+            ["keepWindowsBanners"] = settings.KeepWindowsBanners,
             ["tagFilter"] = new JsonArray()
         };
+    }
+
+    private static string ProductSettingsPath => RemoteNotificationSettingsStore.GetDefaultSettingsPath();
+
+    private static bool ReadBoolean(JsonObject values, string key, bool fallback)
+    {
+        return values[key] is JsonValue value && value.TryGetValue<bool>(out var parsed)
+            ? parsed
+            : fallback;
     }
 }
 
@@ -1070,57 +1110,17 @@ public sealed class AndroidToolsSharedRuntime
         File.AppendAllText(path, entry.ToJsonString() + Environment.NewLine);
     }
 
-    internal NotificationEndpoint LoadNotificationEndpoint()
-    {
-        var source = FindFirstExisting(NotificationConfigCandidates());
-        if (source.Path is null)
-        {
-            return NotificationEndpoint.Missing("simple_http_notification_conf.py was not discovered.");
-        }
-
-        var text = File.ReadAllText(source.Path);
-        var protocol = MatchStringAssignment(text, "cloud_server_protocol") ?? "https";
-        var host = MatchStringAssignment(text, "cloud_server_ip") ?? "";
-        var port = MatchIntAssignment(text, "cloud_server_port") ?? 0;
-
-        var userOverride = Path.Combine(Path.GetDirectoryName(source.Path)!, "simple_http_notification_conf_user.yaml");
-        if (File.Exists(userOverride))
-        {
-            foreach (var pair in NarrowYamlCommandParser.ParseFlatMap(File.ReadAllText(userOverride)))
-            {
-                if (pair.Key == "cloud_server_protocol")
-                {
-                    protocol = pair.Value;
-                }
-                else if (pair.Key == "cloud_server_ip")
-                {
-                    host = pair.Value;
-                }
-                else if (pair.Key == "cloud_server_port" && int.TryParse(pair.Value, out var parsed))
-                {
-                    port = parsed;
-                }
-            }
-        }
-
-        return string.IsNullOrWhiteSpace(host) || port <= 0
-            ? NotificationEndpoint.Missing("Notification endpoint config was parsed but host or port is missing.")
-            : new NotificationEndpoint(true, protocol, host, port, $"Endpoint {protocol}://{host}:{port} imported from {source.SourceKind}.");
-    }
-
-    internal async Task<JsonObject> CheckNotificationServerAsync(CancellationToken cancellationToken)
-    {
-        return await CheckNotificationServerAsync(LoadNotificationEndpoint(), cancellationToken);
-    }
-
-    internal async Task<JsonObject> CheckNotificationServerAsync(NotificationEndpoint endpoint, CancellationToken cancellationToken)
+    internal async Task<JsonObject> CheckNotificationServerAsync(
+        NotificationEndpoint endpoint,
+        string channel,
+        CancellationToken cancellationToken)
     {
         if (!endpoint.Found)
         {
             return endpoint.ToJson();
         }
 
-        var uri = $"{endpoint.Protocol}://{endpoint.Host}:{endpoint.Port}/pull?channel=mpt-self-test";
+        var uri = $"{endpoint.Protocol}://{endpoint.Host}:{endpoint.Port}/pull?channel={Uri.EscapeDataString(channel)}";
         try
         {
             using var response = await _httpClient.GetAsync(uri, cancellationToken);
@@ -1145,25 +1145,22 @@ public sealed class AndroidToolsSharedRuntime
         }
     }
 
-    internal JsonObject NotificationInboxSummary()
-    {
-        return NotificationInboxSummary(LoadNotificationEndpoint());
-    }
-
-    internal JsonObject NotificationInboxSummary(NotificationEndpoint endpoint)
+    internal JsonObject NotificationInboxSummary(NotificationEndpoint endpoint, string? privateKeyPath = null)
     {
         return new JsonObject
         {
             ["endpoint"] = endpoint.ToJson(),
-            ["sshSigningKey"] = LegacySshKeyExists() ? "available" : "missing",
+            ["sshSigningKey"] = LegacySshKeyExists(privateKeyPath) ? "available" : "missing",
             ["legacyHistory"] = NotificationHistoryExists() ? "available" : "missing"
         };
     }
 
-    internal bool LegacySshKeyExists()
+    internal bool LegacySshKeyExists(string? privateKeyPath = null)
     {
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return File.Exists(Path.Combine(profile, ".ssh", "id_ed25519"));
+        var path = string.IsNullOrWhiteSpace(privateKeyPath)
+            ? RemoteNotificationSettings.Default.ExpandedPrivateKeyPath
+            : privateKeyPath;
+        return File.Exists(path);
     }
 
     internal bool NotificationHistoryExists()
@@ -1499,21 +1496,6 @@ public sealed class AndroidToolsSharedRuntime
         }
     }
 
-    private IEnumerable<DiscoveredFile> NotificationConfigCandidates()
-    {
-        var env = Environment.GetEnvironmentVariable("MPT_ANDROIDTOOLS_NOTIFICATION_CONF");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            yield return new DiscoveredFile(env, "env:MPT_ANDROIDTOOLS_NOTIFICATION_CONF");
-        }
-
-        yield return new DiscoveredFile(Path.Combine(PackageRoot, "shared", "powertool", "simple_http_notification_conf.py"), "package-shared");
-        foreach (var file in LegacyFileCandidates("py_modules", "simple_http_notification_conf.py"))
-        {
-            yield return file;
-        }
-    }
-
     private IEnumerable<DiscoveredFile> LegacyFileCandidates(string relativeDirectory, string fileName)
     {
         var root = FindRepositoryRoot(PackageRoot);
@@ -1595,18 +1577,6 @@ public sealed class AndroidToolsSharedRuntime
         }
 
         return null;
-    }
-
-    private static string? MatchStringAssignment(string text, string key)
-    {
-        var match = Regex.Match(text, $@"{Regex.Escape(key)}\s*:\s*str\s*=\s*[""'](?<value>[^""']+)[""']", RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups["value"].Value : null;
-    }
-
-    private static int? MatchIntAssignment(string text, string key)
-    {
-        var match = Regex.Match(text, $@"{Regex.Escape(key)}\s*:\s*int\s*=\s*(?<value>\d+)", RegexOptions.IgnoreCase);
-        return match.Success && int.TryParse(match.Groups["value"].Value, out var value) ? value : null;
     }
 
     private static ProcessStartInfo CreateShellProcessStartInfo(string command)

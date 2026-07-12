@@ -121,12 +121,18 @@ public sealed class RemoteNotificationHttpPollerTests
             "MyPowerTools.Shell.Avalonia.csproj"));
         var legacyStore = File.ReadAllText(Path.Combine(
             root,
+            "tools",
+            "remote-notifications",
+            "current-integration",
             "src",
             "MyPowerTools.Shell.Avalonia",
             "Services",
             "RemoteNotificationsLegacyStore.cs"));
         var poller = File.ReadAllText(Path.Combine(
             root,
+            "tools",
+            "remote-notifications",
+            "current-integration",
             "src",
             "MyPowerTools.Shell.Avalonia",
             "Services",

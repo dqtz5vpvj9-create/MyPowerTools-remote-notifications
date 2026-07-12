@@ -3,12 +3,15 @@
   <ItemGroup>
     <ProjectReference Include="$(MyPowerToolsRepoRoot)\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
     <ProjectReference Include="$(MyPowerToolsRepoRoot)\src\MyPowerTools.Protocol\MyPowerTools.Protocol.csproj" />
+    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationSettingsStore.cs"
+             Link="Configuration\RemoteNotificationSettingsStore.cs" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);ANDROID_TOOLS_ADAPTER</DefineConstants>
     <MyPowerToolsRepoRoot Condition="'$(MyPowerToolsRepoRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..\..'))</MyPowerToolsRepoRoot>
     <ModulePackageRoot Condition="'$(ModulePackageRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..\artifacts\package\android-tools-suite</ModulePackageRoot>
   </PropertyGroup>

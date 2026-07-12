@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using MyPowerTools.RemoteNotifications.Configuration;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Crypto.Utilities;
@@ -28,22 +29,37 @@ public sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPo
     private readonly HttpClient _httpClient;
     private readonly string _endpoint;
     private readonly string _privateKeyPath;
+    private readonly string _channel;
+
+    public RemoteNotificationHttpPoller(
+        RemoteNotificationSettings settings,
+        HttpClient? httpClient = null)
+        : this(
+            httpClient,
+            settings?.ExpandedPrivateKeyPath,
+            settings?.Endpoint,
+            settings?.Channel)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+    }
 
     public RemoteNotificationHttpPoller(
         HttpClient? httpClient = null,
         string? privateKeyPath = null,
-        string? endpoint = null)
+        string? endpoint = null,
+        string? channel = null)
     {
+        var defaults = new RemoteNotificationSettingsStore().Load();
         _httpClient = httpClient ?? SharedHttpClient;
         _endpoint = string.IsNullOrWhiteSpace(endpoint)
-            ? RemoteNotificationsLegacyStore.ServerEndpoint
+            ? defaults.Endpoint
             : endpoint.TrimEnd('/');
         _privateKeyPath = string.IsNullOrWhiteSpace(privateKeyPath)
-            ? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".ssh",
-                "id_ed25519")
+            ? defaults.ExpandedPrivateKeyPath
             : privateKeyPath;
+        _channel = string.IsNullOrWhiteSpace(channel)
+            ? defaults.Channel
+            : channel.Trim();
     }
 
     public async Task<RemoteNotificationPullResult> PullAsync(
@@ -136,7 +152,7 @@ public sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPo
             .Select(item => new RemoteNotificationRecord(
                 item.Id ?? item.MessageId ?? "",
                 string.IsNullOrWhiteSpace(item.Channel)
-                    ? RemoteNotificationsLegacyStore.DefaultChannel
+                    ? _channel
                     : item.Channel,
                 item.Message ?? "",
                 string.IsNullOrWhiteSpace(item.Icon) ? "info" : item.Icon,
@@ -153,7 +169,7 @@ public sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPo
     {
         var parameters = new List<KeyValuePair<string, string>>
         {
-            new("channel", RemoteNotificationsLegacyStore.DefaultChannel),
+            new("channel", _channel),
             new("sig", signature),
             new("limit", PullLimit.ToString(System.Globalization.CultureInfo.InvariantCulture))
         };
@@ -225,7 +241,7 @@ public static class RemoteNotificationSshSigner
         if (!File.Exists(privateKeyPath))
         {
             throw new FileNotFoundException(
-                "The SSH signing key was not found. Create ~/.ssh/id_ed25519, then retry.",
+                "The SSH signing key was not found at the configured path.",
                 privateKeyPath);
         }
 

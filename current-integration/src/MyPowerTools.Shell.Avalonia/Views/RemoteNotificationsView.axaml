@@ -71,9 +71,9 @@
 
   <Grid MaxWidth="1280"
         HorizontalAlignment="Stretch"
-        RowDefinitions="Auto,Auto,Auto,*">
+        RowDefinitions="Auto,Auto,Auto,Auto,*">
     <Grid Grid.Row="0"
-          ColumnDefinitions="Auto,*,Auto,Auto"
+          ColumnDefinitions="Auto,*,Auto,Auto,Auto"
           ColumnSpacing="14"
           MinHeight="48"
           Margin="0,0,0,4">
@@ -159,21 +159,122 @@
                             Content="Keep banners"
                             IsChecked="{Binding PersistentWindowsToasts, Mode=TwoWay}"
                             ToolTip.Tip="Keep Windows notification banners visible until dismissed"
+                            IsVisible="{Binding IsInboxVisible}"
                             VerticalAlignment="Center" />
       <controls:MptButton Grid.Column="3"
                           Content="Clear all"
                           Click="OnClearClick"
                           ToolTip.Tip="Remove stored notifications"
+                          IsVisible="{Binding IsInboxVisible}"
                           VerticalAlignment="Center" />
+      <Grid Grid.Column="4">
+        <controls:MptButton Content="Settings"
+                            Command="{Binding ShowSettingsCommand}"
+                            IsVisible="{Binding IsInboxVisible}"
+                            VerticalAlignment="Center" />
+        <controls:MptButton Content="Back to inbox"
+                            Command="{Binding ShowInboxCommand}"
+                            IsVisible="{Binding IsSettingsVisible}"
+                            VerticalAlignment="Center" />
+      </Grid>
     </Grid>
 
     <Border Grid.Row="1"
+            Classes="MptSettingsSection"
+            Padding="20"
+            CornerRadius="{DynamicResource MptRadiusCard}"
+            BorderBrush="{DynamicResource MptBrushBorder}"
+            BorderThickness="1"
+            Background="{DynamicResource MptBrushCardBackground}"
+            IsVisible="{Binding IsSettingsVisible}">
+      <StackPanel Spacing="18">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="MptSectionTitle" Text="Notification source" />
+          <TextBlock Classes="MptPageSubtitle"
+                     Text="Configure the signed feed used by this inbox and by module diagnostics. Changes take effect as soon as they are saved."
+                     TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="150,*,120"
+              RowDefinitions="Auto,Auto"
+              ColumnSpacing="12"
+              RowSpacing="6">
+          <TextBlock Text="Protocol" FontWeight="SemiBold" />
+          <TextBlock Grid.Column="1" Text="Host" FontWeight="SemiBold" />
+          <TextBlock Grid.Column="2" Text="Port" FontWeight="SemiBold" />
+          <controls:MptComboBox Grid.Row="1"
+                                ItemsSource="{Binding ProtocolOptions}"
+                                SelectedItem="{Binding ProtocolDraft, Mode=TwoWay}" />
+          <controls:MptTextBox Grid.Row="1"
+                               Grid.Column="1"
+                               Text="{Binding HostDraft, Mode=TwoWay}"
+                               PlaceholderText="message.example.com" />
+          <controls:MptTextBox Grid.Row="1"
+                               Grid.Column="2"
+                               Text="{Binding PortDraft, Mode=TwoWay}"
+                               PlaceholderText="8888" />
+        </Grid>
+
+        <Grid ColumnDefinitions="*,180"
+              RowDefinitions="Auto,Auto"
+              ColumnSpacing="12"
+              RowSpacing="6">
+          <TextBlock Text="Channel" FontWeight="SemiBold" />
+          <TextBlock Grid.Column="1" Text="Poll interval (seconds)" FontWeight="SemiBold" />
+          <controls:MptTextBox Grid.Row="1"
+                               Text="{Binding ChannelDraft, Mode=TwoWay}"
+                               PlaceholderText="default" />
+          <controls:MptTextBox Grid.Row="1"
+                               Grid.Column="1"
+                               Text="{Binding PollIntervalDraft, Mode=TwoWay}"
+                               PlaceholderText="5" />
+        </Grid>
+
+        <StackPanel Spacing="6">
+          <TextBlock Text="SSH private key path" FontWeight="SemiBold" />
+          <controls:MptTextBox Text="{Binding PrivateKeyPathDraft, Mode=TwoWay}"
+                               PlaceholderText="~/.ssh/id_ed25519" />
+          <TextBlock Classes="MptMeta"
+                     Text="{Binding PrivateKeyStatus}"
+                     TextWrapping="Wrap" />
+          <TextBlock Classes="MptMeta"
+                     Text="Only the path is stored. Private-key contents are never displayed or copied into settings."
+                     TextWrapping="Wrap" />
+        </StackPanel>
+
+        <controls:MptCheckBox Content="Keep Windows notification banners visible until dismissed"
+                              IsChecked="{Binding KeepWindowsBannersDraft, Mode=TwoWay}" />
+
+        <Border Padding="12"
+                CornerRadius="{DynamicResource MptRadiusControl}"
+                Background="{DynamicResource MptBrushSurfaceInset}"
+                IsVisible="{Binding HasSettingsFeedback}">
+          <TextBlock Text="{Binding SettingsFeedback}"
+                     Foreground="{Binding SettingsFeedbackForeground}"
+                     TextWrapping="Wrap" />
+        </Border>
+
+        <StackPanel Orientation="Horizontal"
+                    Spacing="10"
+                    HorizontalAlignment="Right">
+          <controls:MptButton Content="Revert changes"
+                              Command="{Binding ResetSettingsCommand}" />
+          <controls:MptButton Content="Test connection and signing"
+                              Command="{Binding TestSettingsCommand}" />
+          <controls:MptButton Classes="MptPrimaryButton"
+                              Content="Save and restart sync"
+                              Command="{Binding SaveSettingsCommand}" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <Border Grid.Row="2"
             Padding="{DynamicResource MptUniformL}"
             CornerRadius="{DynamicResource MptRadiusCard}"
             BorderBrush="{DynamicResource MptBrushDanger}"
             BorderThickness="1"
             Background="{DynamicResource MptBrushWarningBackground}"
-            IsVisible="{Binding HasSyncError}">
+            IsVisible="{Binding ShowSyncError}">
       <Grid RowDefinitions="Auto,Auto"
             ColumnDefinitions="Auto,*,Auto"
             ColumnSpacing="12">
@@ -216,11 +317,11 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="2"
+    <Border Grid.Row="3"
             Padding="0,4"
             BorderBrush="{DynamicResource MptBrushDivider}"
             BorderThickness="0,1,0,1"
-            IsVisible="{Binding HasLabels}">
+            IsVisible="{Binding ShowInboxLabels}">
       <Grid>
         <ScrollViewer
                       HorizontalScrollBarVisibility="Auto"
@@ -245,9 +346,10 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="3"
+    <Grid Grid.Row="4"
           Margin="0,4,0,0"
-          MinHeight="280">
+          MinHeight="280"
+          IsVisible="{Binding IsInboxVisible}">
       <ListBox x:Name="NotificationList"
                Classes="notification-list"
                ItemsSource="{Binding VisibleMessages}"

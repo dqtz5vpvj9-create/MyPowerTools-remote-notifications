@@ -1,6 +1,7 @@
 using MyPowerTools.Shell.Avalonia.Services;
 using MyPowerTools.Shell.Avalonia.ViewModels;
 using MyPowerTools.Shell.Avalonia.Views;
+using MyPowerTools.RemoteNotifications.Configuration;
 
 namespace MyPowerTools.Tests;
 
@@ -114,6 +115,43 @@ public sealed class RemoteNotificationsProductTests
         Assert.Equal("Idle", viewModel.StatusText);
         Assert.Equal("#9E9E9E", viewModel.StatusForeground);
         Assert.Equal("#F0F0F0", viewModel.StatusBackground);
+    }
+
+    [Fact]
+    public async Task Saving_product_settings_rebuilds_the_poller_and_refreshes_immediately()
+    {
+        var savedSettings = RemoteNotificationSettings.Default;
+        var settingsStore = new FakeSettingsStore(savedSettings);
+        var rebuiltPoller = new FakePoller(new RemoteNotificationPullResult("idle", [], ""));
+        RemoteNotificationSettings? factorySettings = null;
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([], [], null, false),
+            new FakeStore(),
+            new FakePoller(),
+            settingsStore: settingsStore,
+            pollerFactory: settings =>
+            {
+                factorySettings = settings;
+                return rebuiltPoller;
+            });
+        viewModel.ProtocolDraft = "http";
+        viewModel.HostDraft = "0.0.0.0";
+        viewModel.PortDraft = "19091";
+        viewModel.ChannelDraft = "automation";
+        viewModel.PollIntervalDraft = "17";
+        viewModel.PrivateKeyPathDraft = "key";
+        viewModel.KeepWindowsBannersDraft = true;
+
+        viewModel.SaveSettingsCommand.Execute(null);
+        await WaitUntilAsync(() => settingsStore.SaveCount == 1 && rebuiltPoller.CallCount == 1);
+
+        Assert.NotNull(factorySettings);
+        Assert.Equal("http://0.0.0.0:19091", factorySettings.Endpoint);
+        Assert.Equal("automation", factorySettings.Channel);
+        Assert.Equal(17, viewModel.PollIntervalSeconds);
+        Assert.Equal("http://0.0.0.0:19091", viewModel.Server);
+        Assert.True(viewModel.PersistentWindowsToasts);
+        Assert.Equal("idle", viewModel.ConnectionState);
     }
 
     [Fact]
@@ -342,16 +380,23 @@ public sealed class RemoteNotificationsProductTests
     [Fact]
     public void Remote_notifications_implementation_tracks_the_original_source_contract()
     {
+        var integrationRoot = Path.Combine(
+            Root,
+            "tools",
+            "remote-notifications",
+            "current-integration",
+            "src",
+            "MyPowerTools.Shell.Avalonia");
         var store = File.ReadAllText(Path.Combine(
-            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "RemoteNotificationsLegacyStore.cs"));
+            integrationRoot, "Services", "RemoteNotificationsLegacyStore.cs"));
         var viewModel = File.ReadAllText(Path.Combine(
-            Root, "src", "MyPowerTools.Shell.Avalonia", "ViewModels", "RemoteNotificationsViewModels.cs"));
+            integrationRoot, "ViewModels", "RemoteNotificationsViewModels.cs"));
         var toast = File.ReadAllText(Path.Combine(
-            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "RemoteNotificationToastPublisher.cs"));
+            integrationRoot, "Services", "RemoteNotificationToastPublisher.cs"));
         var activation = File.ReadAllText(Path.Combine(
-            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "RemoteNotificationActivationService.cs"));
+            integrationRoot, "Services", "RemoteNotificationActivationService.cs"));
         var toastPlatform = File.ReadAllText(Path.Combine(
-            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "WindowsRemoteNotificationToastPlatform.cs"));
+            integrationRoot, "Services", "WindowsRemoteNotificationToastPlatform.cs"));
         var program = File.ReadAllText(Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia", "Program.cs"));
         var app = File.ReadAllText(Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia", "App.cs"));
         var mainWindowRoot = Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia");
@@ -510,6 +555,22 @@ public sealed class RemoteNotificationsProductTests
         }
     }
 
+    private sealed class FakeSettingsStore(RemoteNotificationSettings settings) : IRemoteNotificationSettingsStore
+    {
+        private RemoteNotificationSettings _settings = settings;
+
+        public string SettingsPath => "memory://remote-notifications/settings.json";
+        public int SaveCount { get; private set; }
+
+        public RemoteNotificationSettings Load() => _settings;
+
+        public void Save(RemoteNotificationSettings value)
+        {
+            _settings = value;
+            SaveCount++;
+        }
+    }
+
     private sealed class FakeToastPublisher : IRemoteNotificationToastPublisher
     {
         public List<(string MessageId, bool Persistent)> Published { get; } = [];
@@ -578,5 +639,19 @@ public sealed class RemoteNotificationsProductTests
         }
 
         throw new DirectoryNotFoundException("MyPowerTools repository root was not found.");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
+        while (!condition())
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException("The asynchronous settings operation did not complete.");
+            }
+
+            await Task.Delay(10);
+        }
     }
 }

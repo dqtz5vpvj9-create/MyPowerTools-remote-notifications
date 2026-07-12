@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
+using MyPowerTools.RemoteNotifications.Configuration;
 using MyPowerTools.Shell.Avalonia.Services;
 
 namespace MyPowerTools.Shell.Avalonia.ViewModels;
@@ -8,7 +9,10 @@ namespace MyPowerTools.Shell.Avalonia.ViewModels;
 public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewModel
 {
     private readonly IRemoteNotificationsStore _store;
-    private readonly IRemoteNotificationPoller _poller;
+    private IRemoteNotificationPoller _poller;
+    private readonly IRemoteNotificationSettingsStore _settingsStore;
+    private readonly Func<RemoteNotificationSettings, IRemoteNotificationPoller> _pollerFactory;
+    private RemoteNotificationSettings _settings;
     private readonly IRemoteNotificationToastPublisher _toastPublisher;
     private readonly RemoteNotificationSeenIdRing _seenIds;
     private readonly HashSet<string> _unreadLabels = new(StringComparer.Ordinal);
@@ -29,14 +33,19 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
         RemoteNotificationsSnapshot snapshot,
         IRemoteNotificationsStore? store = null,
         IRemoteNotificationPoller? poller = null,
-        IRemoteNotificationToastPublisher? toastPublisher = null)
+        IRemoteNotificationToastPublisher? toastPublisher = null,
+        IRemoteNotificationSettingsStore? settingsStore = null,
+        Func<RemoteNotificationSettings, IRemoteNotificationPoller>? pollerFactory = null)
         : base(
             "Remote Notifications",
             "Signed messages are synchronized automatically and kept in your local notification history.",
             ToolProductState.Ready)
     {
-        _store = store ?? new RemoteNotificationsLegacyStore();
-        _poller = poller ?? new RemoteNotificationHttpPoller();
+        _settingsStore = settingsStore ?? new RemoteNotificationSettingsStore();
+        _settings = _settingsStore.Load();
+        _store = store ?? new RemoteNotificationsLegacyStore(_settingsStore);
+        _pollerFactory = pollerFactory ?? (settings => new RemoteNotificationHttpPoller(settings));
+        _poller = poller ?? _pollerFactory(_settings);
         _toastPublisher = toastPublisher ?? RemoteNotificationToastPublisherFactory.CreateForCurrentRuntime();
         _filterLabel = snapshot.FilterLabel;
         _persistentWindowsToasts = snapshot.PersistentWindowsToasts;
@@ -56,6 +65,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
             IsErrorDetailsExpanded = !IsErrorDetailsExpanded;
             return Task.CompletedTask;
         });
+        InitializeSettingsEditor();
         _waterline = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         RebuildChips();
         NotifyMessageViewChanged();
@@ -217,6 +227,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
         if (KnownLabels.Count == 0)
         {
             OnPropertyChanged(nameof(HasLabels));
+            OnPropertyChanged(nameof(ShowInboxLabels));
             return;
         }
 
@@ -237,6 +248,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
         }
 
         OnPropertyChanged(nameof(HasLabels));
+        OnPropertyChanged(nameof(ShowInboxLabels));
     }
 
     private void PersistMessages()

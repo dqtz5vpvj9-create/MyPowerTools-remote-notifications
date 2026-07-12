@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Win32;
+using MyPowerTools.RemoteNotifications.Configuration;
 
 namespace MyPowerTools.Shell.Avalonia.Services;
 
@@ -58,7 +59,6 @@ public sealed class RemoteNotificationNoopPoller : IRemoteNotificationPoller
 
 public sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 {
-    public const string ServerEndpoint = "https://message.lixinrui000.cn:8888";
     public const string DefaultChannel = "default";
     public const string FilterAll = "__all__";
     public const int MaximumMessages = 500;
@@ -71,17 +71,25 @@ public sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         PropertyNameCaseInsensitive = true
     };
 
+    private readonly IRemoteNotificationSettingsStore _settingsStore;
+
+    public RemoteNotificationsLegacyStore(IRemoteNotificationSettingsStore? settingsStore = null)
+    {
+        _settingsStore = settingsStore ?? new RemoteNotificationSettingsStore();
+    }
+
     public RemoteNotificationsSnapshot Load()
     {
+        var productSettings = _settingsStore.Load();
         if (!OperatingSystem.IsWindows())
         {
-            return new RemoteNotificationsSnapshot([], [], null, false, []);
+            return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
         }
 
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: false);
         if (key is null)
         {
-            return new RemoteNotificationsSnapshot([], [], null, false, []);
+            return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
         }
 
         var messages = ParseMessages(ReadText(key.GetValue("messages")));
@@ -105,7 +113,13 @@ public sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                      string.Equals(savedFilter, FilterAll, StringComparison.Ordinal)
             ? null
             : savedFilter;
-        var persistent = ParseBoolean(key.GetValue("windows_toast_reminder"));
+        var legacyPersistent = ParseBoolean(key.GetValue("windows_toast_reminder"));
+        if (!File.Exists(_settingsStore.SettingsPath) && legacyPersistent)
+        {
+            productSettings = productSettings with { KeepWindowsBanners = true };
+            _settingsStore.Save(productSettings);
+        }
+        var persistent = productSettings.KeepWindowsBanners;
         var seen = ParseStringList(ReadText(key.GetValue("seen_message_ids")))
             .TakeLast(MaximumSeenMessageIds)
             .ToList();
@@ -170,6 +184,8 @@ public sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     public void SavePersistentWindowsToasts(bool enabled)
     {
+        var settings = _settingsStore.Load() with { KeepWindowsBanners = enabled };
+        _settingsStore.Save(settings);
         WriteString("windows_toast_reminder", enabled ? "true" : "false");
     }
 

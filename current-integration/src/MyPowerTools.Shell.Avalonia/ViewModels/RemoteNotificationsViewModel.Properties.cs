@@ -12,7 +12,7 @@ public sealed partial class RemoteNotificationsViewModel
     public ObservableCollection<RemoteNotificationLabelChipViewModel> Chips { get; }
     public ICommand RetryCommand { get; }
     public ICommand ToggleErrorDetailsCommand { get; }
-    public string Server => RemoteNotificationsLegacyStore.ServerEndpoint;
+    public string Server => _settings.Endpoint;
     public bool HasLabels => KnownLabels.Count > 0;
     public string FilterLabel => _filterLabel ?? RemoteNotificationsLegacyStore.FilterAll;
     public int TotalCount => Messages.Count;
@@ -52,6 +52,8 @@ public sealed partial class RemoteNotificationsViewModel
             try
             {
                 _store.SavePersistentWindowsToasts(value);
+                _settings = _settings with { KeepWindowsBanners = value };
+                KeepWindowsBannersDraft = value;
             }
             catch (Exception exception)
             {
@@ -77,6 +79,7 @@ public sealed partial class RemoteNotificationsViewModel
             OnPropertyChanged(nameof(ConnectionSummary));
             OnPropertyChanged(nameof(IsPolling));
             OnPropertyChanged(nameof(HasSyncError));
+            OnPropertyChanged(nameof(ShowSyncError));
             OnPropertyChanged(nameof(ErrorTitle));
             OnPropertyChanged(nameof(ErrorSummary));
             OnPropertyChanged(nameof(TechnicalErrorDetails));
@@ -209,6 +212,7 @@ public sealed partial class RemoteNotificationsViewModel
             }
 
             OnPropertyChanged(nameof(HasSyncError));
+            OnPropertyChanged(nameof(ShowSyncError));
             OnPropertyChanged(nameof(ErrorSummary));
             OnPropertyChanged(nameof(TechnicalErrorDetails));
             if (!HasSyncError)
