@@ -1,0 +1,29 @@
+{
+  "id": "remote-notifications.service",
+  "toolId": "remote-notifications",
+  "displayName": "Remote Notifications Service",
+  "exec": "RemoteNotifications.Service.exe",
+  "arguments": [
+    "--pipe",
+    "remote-notifications.core",
+    "--heartbeat-file",
+    "%LOCALAPPDATA%/MyPowerTools/state/remote-notifications.heartbeat",
+    "--instance-token",
+    "remote-notifications-service-v1"
+  ],
+  "workingDirectory": "",
+  "environment": {
+    "RemoteNotifications__Transport": "pipe",
+    "RemoteNotifications__NamedPipe__Name": "remote-notifications.core",
+    "MPT_TOOL_DATA_ROOT": "%LOCALAPPDATA%/MyPowerTools/state/tools/remote-notifications"
+  },
+  "autostart": true,
+  "restartPolicy": { "maxRestarts": 5, "backoffMs": 2000 },
+  "readiness": { "kind": "pipe", "address": "remote-notifications.core", "timeoutMs": 8000 },
+  "stopTimeoutMs": 5000,
+  "dataRoots": [
+    "%LOCALAPPDATA%/MyPowerTools/state/tools/remote-notifications"
+  ],
+  "dependsOn": [],
+  "instanceToken": "remote-notifications-service-v1"
+}

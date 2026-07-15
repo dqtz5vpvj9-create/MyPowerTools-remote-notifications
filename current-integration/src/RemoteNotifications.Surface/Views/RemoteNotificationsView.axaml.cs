@@ -45,10 +45,12 @@ public sealed partial class RemoteNotificationsView : UserControl
         }
 
         SubscribeToMessageChanges();
+        (DataContext as RemoteNotificationsViewModel)?.Activate();
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
+        (DataContext as RemoteNotificationsViewModel)?.Deactivate();
         UnsubscribeFromMessageChanges();
         _pendingScrollAnchor = null;
         _scrollRestoreQueued = false;

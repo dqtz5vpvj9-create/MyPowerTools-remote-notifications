@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
+using Avalonia.Threading;
 using MyPowerTools.RemoteNotifications.Configuration;
 using RemoteNotifications.Surface.Services;
 
@@ -10,12 +11,13 @@ namespace RemoteNotifications.Surface.ViewModels;
 public sealed partial class RemoteNotificationsViewModel : MyPowerTools.AvaloniaSdk.ToolSurfacePageViewModel
 {
     private readonly IRemoteNotificationsStore _store;
+    private readonly IRemoteNotificationsServiceClient? _serviceClient;
     private IRemoteNotificationPoller _poller;
     private readonly IRemoteNotificationSettingsStore _settingsStore;
     private readonly Func<RemoteNotificationSettings, IRemoteNotificationPoller> _pollerFactory;
     private RemoteNotificationSettings _settings;
     private readonly IRemoteNotificationToastPublisher _toastPublisher;
-    private readonly RemoteNotificationSeenIdRing _seenIds;
+    private RemoteNotificationSeenIdRing _seenIds;
     private readonly HashSet<string> _unreadLabels = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _pollGate = new(1, 1);
     private readonly MptAsyncRelayCommand _retryCommand;
@@ -29,6 +31,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private string _lastError = "none";
     private bool _isErrorDetailsExpanded;
     private string _waterline;
+    private CancellationTokenSource? _serviceRefreshCancellation;
 
     public RemoteNotificationsViewModel(
         RemoteNotificationsSnapshot snapshot,
@@ -36,7 +39,8 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         IRemoteNotificationPoller? poller = null,
         IRemoteNotificationToastPublisher? toastPublisher = null,
         IRemoteNotificationSettingsStore? settingsStore = null,
-        Func<RemoteNotificationSettings, IRemoteNotificationPoller>? pollerFactory = null)
+        Func<RemoteNotificationSettings, IRemoteNotificationPoller>? pollerFactory = null,
+        IRemoteNotificationsServiceClient? serviceClient = null)
         : base(
             "Remote Notifications",
             "Signed messages are synchronized automatically and kept in your local notification history.",
@@ -45,6 +49,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         _settingsStore = settingsStore ?? new RemoteNotificationSettingsStore();
         _settings = _settingsStore.Load();
         _store = store ?? new RemoteNotificationsLegacyStore(_settingsStore);
+        _serviceClient = serviceClient;
         _pollerFactory = pollerFactory ?? (settings => new RemoteNotificationHttpPoller(settings));
         _poller = poller ?? _pollerFactory(_settings);
         _toastPublisher = toastPublisher ?? RemoteNotificationToastPublisherFactory.CreateForCurrentRuntime();
@@ -75,6 +80,29 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     public Task RetryAsync()
     {
         return PollAsync();
+    }
+
+    public void Activate()
+    {
+        if (_serviceClient is null || _serviceRefreshCancellation is not null)
+        {
+            return;
+        }
+
+        _serviceRefreshCancellation = new CancellationTokenSource();
+        _ = ObserveServiceAsync(_serviceRefreshCancellation.Token);
+    }
+
+    public void Deactivate()
+    {
+        var cancellation = Interlocked.Exchange(ref _serviceRefreshCancellation, null);
+        if (cancellation is null)
+        {
+            return;
+        }
+
+        cancellation.Cancel();
+        cancellation.Dispose();
     }
 
     public async Task<int> PresentPersistedAsync(
@@ -156,6 +184,15 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
         try
         {
+            if (_serviceClient is not null)
+            {
+                ConnectionState = "running";
+                var state = await _serviceClient.PollAsync(cancellationToken).ConfigureAwait(true);
+                ApplyServiceState(state);
+                ReloadPersistedSnapshot();
+                return;
+            }
+
             LastError = "none";
             ConnectionState = "running";
             var pollTime = DateTimeOffset.Now.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
@@ -235,6 +272,93 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         {
             _pollGate.Release();
         }
+    }
+
+    private async Task ObserveServiceAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var state = await _serviceClient!.GetStateAsync(cancellationToken).ConfigureAwait(false);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    ApplyServiceState(state);
+                    ReloadPersistedSnapshot();
+                });
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    ConnectionState = "error";
+                    LastError = exception.Message;
+                });
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private void ApplyServiceState(RemoteNotificationsServiceState state)
+    {
+        ConnectionState = state.ConnectionState;
+        LastPoll = state.LastPoll;
+        LastError = state.LastError;
+        Latest = state.Latest;
+        Fetched = state.Fetched.ToString(CultureInfo.InvariantCulture);
+        Shown = state.Shown.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void ReloadPersistedSnapshot()
+    {
+        var snapshot = _store.Load();
+        var persistedNewestFirst = snapshot.MessagesOldestFirst.Reverse().ToArray();
+        var currentIds = Messages.Select(message => message.Id).ToArray();
+        var persistedIds = persistedNewestFirst
+            .Select(RemoteNotificationsLegacyStore.StableId)
+            .ToArray();
+        if (!currentIds.SequenceEqual(persistedIds, StringComparer.Ordinal))
+        {
+            Messages.Clear();
+            foreach (var message in persistedNewestFirst)
+            {
+                Messages.Add(new RemoteNotificationMessageViewModel(message));
+            }
+        }
+
+        if (!KnownLabels.SequenceEqual(snapshot.KnownLabels, StringComparer.Ordinal))
+        {
+            KnownLabels.Clear();
+            foreach (var label in snapshot.KnownLabels)
+            {
+                KnownLabels.Add(label);
+            }
+            RebuildChips();
+        }
+
+        _seenIds = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
+        foreach (var message in Messages.Reverse())
+        {
+            _seenIds.TryAccept(message.Id, message.FallbackId);
+        }
+
+        foreach (var message in Messages)
+        {
+            message.RefreshRelativeTime();
+        }
+        NotifyMessageViewChanged();
     }
 
     public void ClearMessages()

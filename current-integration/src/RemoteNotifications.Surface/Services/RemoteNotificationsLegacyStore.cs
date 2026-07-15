@@ -107,15 +107,71 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     };
 
     private readonly IRemoteNotificationSettingsStore _settingsStore;
+    private readonly string? _statePath;
+    private readonly bool _importLegacyRegistry;
 
-    public RemoteNotificationsLegacyStore(IRemoteNotificationSettingsStore? settingsStore = null)
+    public RemoteNotificationsLegacyStore(
+        IRemoteNotificationSettingsStore? settingsStore = null,
+        string? dataRoot = null)
     {
         _settingsStore = settingsStore ?? new RemoteNotificationSettingsStore();
+        var resolvedDataRoot = string.IsNullOrWhiteSpace(dataRoot)
+            ? Environment.GetEnvironmentVariable("MPT_TOOL_DATA_ROOT")
+            : dataRoot;
+        _statePath = string.IsNullOrWhiteSpace(resolvedDataRoot)
+            ? null
+            : Path.Combine(
+                Path.GetFullPath(Environment.ExpandEnvironmentVariables(resolvedDataRoot)),
+                "history.json");
+        _importLegacyRegistry = !string.Equals(
+            Environment.GetEnvironmentVariable("MPT_REMOTE_NOTIFICATIONS_SKIP_LEGACY_IMPORT"),
+            "1",
+            StringComparison.Ordinal);
     }
 
     public RemoteNotificationsSnapshot Load()
     {
         var productSettings = _settingsStore.Load();
+        if (_statePath is not null)
+        {
+            return WithFileLock(() =>
+            {
+                if (File.Exists(_statePath))
+                {
+                    return ToSnapshot(ReadFileStateUnsafe(), productSettings.KeepWindowsBanners);
+                }
+
+                var imported = _importLegacyRegistry
+                    ? LoadRegistry(productSettings)
+                    : new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
+                var cleanedMessages = imported.MessagesOldestFirst
+                    .Where(message => !message.Id.StartsWith("test-inject-", StringComparison.Ordinal))
+                    .ToArray();
+                var cleanedLabels = cleanedMessages
+                    .Select(message => ExtractLabel(message.Message))
+                    .Reverse()
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                var cleaned = imported with
+                {
+                    MessagesOldestFirst = cleanedMessages,
+                    KnownLabels = cleanedLabels,
+                    SeenMessageIds = cleanedMessages
+                        .SelectMany(message => new[] { StableId(message), FallbackId(message) })
+                        .Distinct(StringComparer.Ordinal)
+                        .TakeLast(MaximumSeenMessageIds)
+                        .ToArray()
+                };
+                WriteFileStateUnsafe(FromSnapshot(cleaned));
+                return cleaned;
+            });
+        }
+
+        return LoadRegistry(productSettings);
+    }
+
+    private RemoteNotificationsSnapshot LoadRegistry(RemoteNotificationSettings productSettings)
+    {
         if (!OperatingSystem.IsWindows())
         {
             return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
@@ -173,6 +229,22 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     public void SaveMessages(IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
     {
+        if (_statePath is not null)
+        {
+            WithFileLock(() =>
+            {
+                var state = ReadFileStateUnsafe();
+                state.Messages = messagesOldestFirst.TakeLast(MaximumMessages).ToList();
+                foreach (var message in state.Messages)
+                {
+                    Remember(state.SeenMessageIds, StableId(message), MaximumSeenMessageIds);
+                    Remember(state.SeenMessageIds, FallbackId(message), MaximumSeenMessageIds);
+                }
+                WriteFileStateUnsafe(state);
+            });
+            return;
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             return;
@@ -210,11 +282,31 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     public void SaveFilter(string? label)
     {
+        if (_statePath is not null)
+        {
+            WithFileLock(() =>
+            {
+                var state = ReadFileStateUnsafe();
+                state.FilterLabel = string.IsNullOrWhiteSpace(label) ? null : label;
+                WriteFileStateUnsafe(state);
+            });
+            return;
+        }
         WriteString("filter_label", string.IsNullOrWhiteSpace(label) ? FilterAll : label);
     }
 
     public void SaveKnownLabels(IReadOnlyList<string> labels)
     {
+        if (_statePath is not null)
+        {
+            WithFileLock(() =>
+            {
+                var state = ReadFileStateUnsafe();
+                state.KnownLabels = labels.Distinct(StringComparer.Ordinal).ToList();
+                WriteFileStateUnsafe(state);
+            });
+            return;
+        }
         WriteString("known_labels", string.Join(',', labels));
     }
 
@@ -222,11 +314,29 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     {
         var settings = _settingsStore.Load() with { KeepWindowsBanners = enabled };
         _settingsStore.Save(settings);
-        WriteString("windows_toast_reminder", enabled ? "true" : "false");
+        if (_statePath is null)
+        {
+            WriteString("windows_toast_reminder", enabled ? "true" : "false");
+        }
     }
 
     public void SaveSeenMessageIds(IReadOnlyList<string> messageIdsOldestFirst)
     {
+        if (_statePath is not null)
+        {
+            WithFileLock(() =>
+            {
+                var state = ReadFileStateUnsafe();
+                state.SeenMessageIds = messageIdsOldestFirst
+                    .Where(messageId => !string.IsNullOrWhiteSpace(messageId))
+                    .Distinct(StringComparer.Ordinal)
+                    .TakeLast(MaximumSeenMessageIds)
+                    .ToList();
+                WriteFileStateUnsafe(state);
+            });
+            return;
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             return;
@@ -248,7 +358,137 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     public void ClearMessages()
     {
+        if (_statePath is not null)
+        {
+            WithFileLock(() =>
+            {
+                var state = ReadFileStateUnsafe();
+                state.Messages.Clear();
+                WriteFileStateUnsafe(state);
+            });
+            return;
+        }
         WriteString("messages", "[]");
+    }
+
+    private T WithFileLock<T>(Func<T> action)
+    {
+        var mutexName = $"Local\\MyPowerTools.RemoteNotifications.{Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(_statePath!)))[..24]}";
+        using var mutex = new Mutex(false, mutexName);
+        var acquired = false;
+        try
+        {
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(10));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+
+            if (!acquired)
+            {
+                throw new TimeoutException("Remote notification history is busy.");
+            }
+            return action();
+        }
+        finally
+        {
+            if (acquired)
+            {
+                mutex.ReleaseMutex();
+            }
+        }
+    }
+
+    private void WithFileLock(Action action) => WithFileLock(() =>
+    {
+        action();
+        return true;
+    });
+
+    private PersistedState ReadFileStateUnsafe()
+    {
+        if (!File.Exists(_statePath))
+        {
+            return new PersistedState();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<PersistedState>(
+                File.ReadAllText(_statePath),
+                JsonOptions) ?? new PersistedState();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new PersistedState();
+        }
+    }
+
+    private void WriteFileStateUnsafe(PersistedState state)
+    {
+        var statePath = _statePath
+            ?? throw new InvalidOperationException("Remote notification history path is unavailable.");
+        var directory = Path.GetDirectoryName(statePath)
+            ?? throw new InvalidOperationException("Remote notification history directory is invalid.");
+        Directory.CreateDirectory(directory);
+        var temporary = $"{statePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(state, JsonOptions));
+            File.Move(temporary, statePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
+    }
+
+    private static PersistedState FromSnapshot(RemoteNotificationsSnapshot snapshot) => new()
+    {
+        Messages = snapshot.MessagesOldestFirst.TakeLast(MaximumMessages).ToList(),
+        KnownLabels = snapshot.KnownLabels.Distinct(StringComparer.Ordinal).ToList(),
+        FilterLabel = snapshot.FilterLabel,
+        SeenMessageIds = (snapshot.SeenMessageIds ?? [])
+            .Distinct(StringComparer.Ordinal)
+            .TakeLast(MaximumSeenMessageIds)
+            .ToList()
+    };
+
+    private static RemoteNotificationsSnapshot ToSnapshot(PersistedState state, bool persistent)
+    {
+        var messages = state.Messages
+            .Where(message => !string.IsNullOrWhiteSpace(message.Message))
+            .TakeLast(MaximumMessages)
+            .ToArray();
+        var labels = state.KnownLabels
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        foreach (var message in messages)
+        {
+            var label = ExtractLabel(message.Message);
+            labels.Remove(label);
+            labels.Insert(0, label);
+        }
+
+        var seen = state.SeenMessageIds
+            .Where(messageId => !string.IsNullOrWhiteSpace(messageId))
+            .Distinct(StringComparer.Ordinal)
+            .TakeLast(MaximumSeenMessageIds)
+            .ToList();
+        foreach (var message in messages)
+        {
+            Remember(seen, StableId(message), MaximumSeenMessageIds);
+            Remember(seen, FallbackId(message), MaximumSeenMessageIds);
+        }
+        return new RemoteNotificationsSnapshot(messages, labels, state.FilterLabel, persistent, seen);
     }
 
     public static string ExtractLabel(string message)
@@ -383,5 +623,13 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
         [JsonPropertyName("server_timestamp")]
         public string? ServerTimestamp { get; init; }
+    }
+
+    private sealed class PersistedState
+    {
+        public List<RemoteNotificationRecord> Messages { get; set; } = [];
+        public List<string> KnownLabels { get; set; } = [];
+        public string? FilterLabel { get; set; }
+        public List<string> SeenMessageIds { get; set; } = [];
     }
 }

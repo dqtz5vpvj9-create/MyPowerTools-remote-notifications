@@ -224,6 +224,14 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
 
     public static string GetDefaultSettingsPath()
     {
+        var toolDataRoot = Environment.GetEnvironmentVariable("MPT_TOOL_DATA_ROOT");
+        if (!string.IsNullOrWhiteSpace(toolDataRoot))
+        {
+            return Path.Combine(
+                Path.GetFullPath(Environment.ExpandEnvironmentVariables(toolDataRoot)),
+                "settings.json");
+        }
+
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localAppData))
         {

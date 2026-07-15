@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RemoteNotifications.Service</AssemblyName>
+    <RootNamespace>RemoteNotifications.Service</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>
+      Remote Notifications Service Unit process, supervised by MyPowerTools.ServiceManager.
+      Owns the signed-pull polling loop, dedup, persisted history, topic indexing and
+      Windows banner dispatch independently of the Shell and Runner: Shell/Runner restarts
+      never end this process. Provides a named-pipe readiness probe and a heartbeat so the
+      ServiceManager can confirm liveness and re-adopt the still-running process across its
+      own restart.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+  </ItemGroup>
+
+  <!-- The worker reuses the real product business logic (no duplication of the signed puller,
+       dedup/history store or seen-id ring). These are the Surface originals (public visibility,
+       no ANDROID_TOOLS_ADAPTER define), so the worker compiles the exact same classes the Shell
+       Surface uses. The Windows toast COM path is reimplemented locally in ToastRuntime.cs so
+       the worker never takes an Avalonia dependency. -->
+  <ItemGroup>
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
+             Link="Shared\RemoteNotificationSettingsStore.cs" />
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationHttpPoller.cs"
+             Link="Shared\RemoteNotificationHttpPoller.cs" />
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
+             Link="Shared\RemoteNotificationsLegacyStore.cs" />
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
+             Link="Shared\RemoteNotificationSeenIdRing.cs" />
+  </ItemGroup>
+
+</Project>
