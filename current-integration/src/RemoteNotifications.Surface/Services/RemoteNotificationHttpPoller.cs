@@ -10,7 +10,7 @@ using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Crypto.Utilities;
 using Org.BouncyCastle.Utilities.IO.Pem;
 
-namespace MyPowerTools.Shell.Avalonia.Services;
+namespace RemoteNotifications.Surface.Services;
 
 #if ANDROID_TOOLS_ADAPTER
 internal

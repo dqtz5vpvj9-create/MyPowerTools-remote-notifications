@@ -1,9 +1,8 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:MyPowerTools.UI.Controls"
-        xmlns:vm="using:MyPowerTools.Shell.Avalonia.ViewModels"
-        xmlns:local="using:MyPowerTools.Shell.Avalonia.Views"
-        x:Class="MyPowerTools.Shell.Avalonia.Views.RemoteNotificationDetailWindow"
+        xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
+        x:Class="RemoteNotifications.Surface.Views.RemoteNotificationDetailWindow"
         x:DataType="vm:RemoteNotificationMessageViewModel"
         Width="920"
         Height="720"
@@ -53,7 +52,7 @@
       <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                     VerticalScrollBarVisibility="Auto"
                     Padding="{DynamicResource MptUniformS}">
-        <local:MptMarkdownView Markdown="{Binding Message}"
+        <controls:MptMarkdownView Markdown="{Binding Message}"
                                HorizontalAlignment="Stretch" />
       </ScrollViewer>
     </Border>

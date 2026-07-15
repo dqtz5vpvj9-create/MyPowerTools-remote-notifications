@@ -1,9 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="using:MyPowerTools.UI.Controls"
-             xmlns:vm="using:MyPowerTools.Shell.Avalonia.ViewModels"
-             xmlns:local="using:MyPowerTools.Shell.Avalonia.Views"
-             x:Class="MyPowerTools.Shell.Avalonia.Views.RemoteNotificationsView"
+             xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
+             x:Class="RemoteNotifications.Surface.Views.RemoteNotificationsView"
              x:DataType="vm:RemoteNotificationsViewModel"
              Background="{DynamicResource MptBrushTransparent}"
              MinHeight="520"
@@ -407,7 +406,7 @@
                                VerticalAlignment="Center" />
                   </Grid>
 
-                  <local:MptMarkdownView Markdown="{Binding DisplayMessage}"
+                  <controls:MptMarkdownView Markdown="{Binding DisplayMessage}"
                                          IsPreview="True"
                                          MaxWidth="920"
                                          MaxHeight="160"

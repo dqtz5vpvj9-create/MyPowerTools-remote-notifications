@@ -37,21 +37,46 @@ public sealed class RemoteNotificationsProductTests
     }
 
     [Fact]
-    public void Markdown_renderer_preserves_links_tables_tasks_and_fenced_code()
+    public void Markdown_renderer_uses_typora_github_html_theme_with_safe_content()
     {
-        var renderer = File.ReadAllText(Path.Combine(
+        var project = File.ReadAllText(Path.Combine(
             Root,
             "src",
-            "MyPowerTools.Shell.Avalonia",
-            "Views",
-            "MarkdownTextBlock.cs"));
+            "MyPowerTools.UI",
+            "MyPowerTools.UI.csproj"));
+        var renderer = File.ReadAllText(Path.Combine(
+            Root, "src", "MyPowerTools.UI", "Controls", "MptMarkdownView.cs"));
+        var integrationRoot = Path.Combine(
+            Root, "tools", "remote-notifications", "current-integration", "src", "RemoteNotifications.Surface");
+        var feed = File.ReadAllText(Path.Combine(integrationRoot, "Views", "RemoteNotificationsView.axaml"));
+        var detail = File.ReadAllText(Path.Combine(integrationRoot, "Views", "RemoteNotificationDetailWindow.axaml"));
 
-        Assert.Contains("HyperlinkButton", renderer, StringComparison.Ordinal);
-        Assert.Contains("TryParseTableRow", renderer, StringComparison.Ordinal);
-        Assert.Contains("TaskPattern", renderer, StringComparison.Ordinal);
-        Assert.Contains("TryParseFence", renderer, StringComparison.Ordinal);
-        Assert.Contains("SyntaxTokenPattern", renderer, StringComparison.Ordinal);
-        Assert.Contains("BareLinkPattern", renderer, StringComparison.Ordinal);
+        Assert.Contains("Avalonia.HtmlRenderer\" Version=\"12.0.0", project, StringComparison.Ordinal);
+        Assert.Contains("Markdig\" Version=\"1.1.2", project, StringComparison.Ordinal);
+        Assert.Contains("MptMarkdownView : HtmlLabel", renderer, StringComparison.Ordinal);
+        Assert.Contains(".UseAdvancedExtensions()", renderer, StringComparison.Ordinal);
+        Assert.Contains(".DisableHtml()", renderer, StringComparison.Ordinal);
+        Assert.Contains("ImageTagRegex().Replace", renderer, StringComparison.Ordinal);
+        Assert.Contains("uri.Scheme is \"http\" or \"https\"", renderer, StringComparison.Ordinal);
+        Assert.Contains("color: #333333", renderer, StringComparison.Ordinal);
+        Assert.Contains("color: #4183c4", renderer, StringComparison.Ordinal);
+        Assert.Contains("padding: 6px 13px", renderer, StringComparison.Ordinal);
+        Assert.Contains("Focusable = true", renderer, StringComparison.Ordinal);
+        Assert.Contains("PointerPressed += InitializeSelectionAtPointerDown", renderer, StringComparison.Ordinal);
+        Assert.Contains("Container.HandleMouseMove(this, _selectionStartPoint.Value)", renderer, StringComparison.Ordinal);
+        Assert.Contains("clipboard.SetTextAsync(selectedText)", renderer, StringComparison.Ordinal);
+        Assert.Contains("ContextMenu = CreateSelectionContextMenu()", renderer, StringComparison.Ordinal);
+        Assert.Contains("_consecutiveClickCount == 3", renderer, StringComparison.Ordinal);
+        Assert.Contains("SelectCurrentRenderedLine(pointerPosition, eventArgs)", renderer, StringComparison.Ordinal);
+        Assert.Contains("LeadingTitleRegex().Replace(markdown, \"###### $1\\n\\n\", 1)", renderer, StringComparison.Ordinal);
+        Assert.Contains("<controls:MptMarkdownView Markdown=\"{Binding DisplayMessage}\"", feed, StringComparison.Ordinal);
+        Assert.Contains("<controls:MptMarkdownView Markdown=\"{Binding Message}\"", detail, StringComparison.Ordinal);
+        Assert.Contains("ColumnDefinitions=\"*,320,Auto\"", feed, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LabelScroller\"", feed, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Hidden\"", feed, StringComparison.Ordinal);
+        Assert.Contains("PointerMoved=\"OnLabelScrollerPointerMoved\"", feed, StringComparison.Ordinal);
+        Assert.Contains("<StackPanel Orientation=\"Horizontal\" />", feed, StringComparison.Ordinal);
+        Assert.DoesNotContain("<WrapPanel", feed, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -73,6 +98,23 @@ public sealed class RemoteNotificationsProductTests
                 previousExtent,
                 currentExtent,
                 viewport));
+    }
+
+    [Theory]
+    [InlineData(0, -120, 1000, 400, 120)]
+    [InlineData(200, 80, 1000, 400, 120)]
+    [InlineData(550, -200, 1000, 400, 600)]
+    [InlineData(40, 200, 1000, 400, 0)]
+    public void Label_strip_drag_clamps_the_horizontal_offset(
+        double startOffset,
+        double pointerDelta,
+        double extent,
+        double viewport,
+        double expected)
+    {
+        Assert.Equal(
+            expected,
+            RemoteNotificationLabelDrag.CalculateOffset(startOffset, pointerDelta, extent, viewport));
     }
 
     [Fact]
@@ -222,6 +264,33 @@ public sealed class RemoteNotificationsProductTests
         Assert.Equal("persistent-message", published.MessageId);
         Assert.True(published.Persistent);
         Assert.Equal("1", viewModel.Shown);
+    }
+
+    [Fact]
+    public async Task Background_message_event_presents_each_persisted_notification_once()
+    {
+        var first = Message("event-first", "[build] first", DateTimeOffset.UtcNow.AddSeconds(-2));
+        var second = Message("event-second", "[build] second", DateTimeOffset.UtcNow.AddSeconds(-1));
+        var store = new FakeStore(new RemoteNotificationsSnapshot(
+            [first, second],
+            ["build"],
+            null,
+            true));
+        var toasts = new FakeToastPublisher();
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([], [], null, true),
+            store,
+            new FakePoller(),
+            toasts);
+
+        var firstPass = await viewModel.PresentPersistedAsync([second.Id, first.Id, second.Id]);
+        var replay = await viewModel.PresentPersistedAsync([first.Id, second.Id]);
+
+        Assert.Equal(2, firstPass);
+        Assert.Equal(0, replay);
+        Assert.Equal([second.Id, first.Id], toasts.Published.Select(item => item.MessageId));
+        Assert.All(toasts.Published, item => Assert.True(item.Persistent));
+        Assert.Equal([first.Id, second.Id], viewModel.Messages.Select(item => item.Id));
     }
 
     [Fact]
@@ -378,6 +447,25 @@ public sealed class RemoteNotificationsProductTests
     }
 
     [Fact]
+    public void Independent_detail_window_resolves_server_and_fallback_message_ids()
+    {
+        var withServerId = Message("server-detail", "[build] server", DateTimeOffset.UtcNow);
+        var fallbackOnly = Message("", "[build] fallback", DateTimeOffset.UtcNow.AddSeconds(-1));
+        var fallbackId = RemoteNotificationsLegacyStore.FallbackId(fallbackOnly);
+
+        Assert.True(RemoteNotificationDetailWindowService.TryFindRecord(
+            [withServerId, fallbackOnly],
+            withServerId.Id,
+            out var serverRecord));
+        Assert.Equal(withServerId, serverRecord);
+        Assert.True(RemoteNotificationDetailWindowService.TryFindRecord(
+            [withServerId, fallbackOnly],
+            fallbackId,
+            out var fallbackRecord));
+        Assert.Equal(fallbackOnly, fallbackRecord);
+    }
+
+    [Fact]
     public void Remote_notifications_implementation_tracks_the_original_source_contract()
     {
         var integrationRoot = Path.Combine(
@@ -395,18 +483,16 @@ public sealed class RemoteNotificationsProductTests
             integrationRoot, "Services", "RemoteNotificationToastPublisher.cs"));
         var activation = File.ReadAllText(Path.Combine(
             integrationRoot, "Services", "RemoteNotificationActivationService.cs"));
+        var detailWindows = File.ReadAllText(Path.Combine(
+            integrationRoot, "Services", "RemoteNotificationDetailWindowService.cs"));
+        var notificationView = File.ReadAllText(Path.Combine(
+            integrationRoot, "Views", "RemoteNotificationsView.axaml.cs"));
+        var detailView = File.ReadAllText(Path.Combine(
+            integrationRoot, "Views", "RemoteNotificationDetailWindow.axaml"));
         var toastPlatform = File.ReadAllText(Path.Combine(
             integrationRoot, "Services", "WindowsRemoteNotificationToastPlatform.cs"));
         var program = File.ReadAllText(Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia", "Program.cs"));
         var app = File.ReadAllText(Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia", "App.cs"));
-        var mainWindowRoot = Path.Combine(Root, "src", "MyPowerTools.Shell.Avalonia");
-        var mainWindow = string.Join(
-            Environment.NewLine,
-            Directory.EnumerateFiles(mainWindowRoot, "MainWindow*.cs")
-                .OrderBy(path => path, StringComparer.Ordinal)
-                .Select(File.ReadAllText));
-        var controller = File.ReadAllText(Path.Combine(
-            Root, "src", "MyPowerTools.Shell.Avalonia", "Services", "ShellWorkspaceController.Tools.cs"));
 
         Assert.Contains("MaximumMessages = 500", store, StringComparison.Ordinal);
         Assert.Contains("MaximumRecentHashes = 200", store, StringComparison.Ordinal);
@@ -416,7 +502,12 @@ public sealed class RemoteNotificationsProductTests
         Assert.Contains("persistent ? \"reminder\"", toast, StringComparison.Ordinal);
         Assert.Contains("mypowertools://remote-notification?id=", toast, StringComparison.Ordinal);
         Assert.Contains("MyPowerTools.RemoteNotificationActivation", activation, StringComparison.Ordinal);
-        Assert.Contains("_navigateAndOpen(request.MessageId)", activation, StringComparison.Ordinal);
+        Assert.Contains("_detailWindows.TryOpen(request.MessageId)", activation, StringComparison.Ordinal);
+        Assert.Contains("detail.Show();", detailWindows, StringComparison.Ordinal);
+        Assert.Contains("_detailWindows.Open(message)", notificationView, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowDialog(owner)", notificationView, StringComparison.Ordinal);
+        Assert.DoesNotContain("detail.Show(owner)", notificationView, StringComparison.Ordinal);
+        Assert.Contains("WindowStartupLocation=\"CenterScreen\"", detailView, StringComparison.Ordinal);
         Assert.Contains("WindowsToastAbi.Show", toastPlatform, StringComparison.Ordinal);
         Assert.Contains("SetCurrentProcessExplicitAppUserModelID", toastPlatform, StringComparison.Ordinal);
         Assert.Contains("TryForwardToRunningShellAsync", program, StringComparison.Ordinal);
@@ -425,12 +516,8 @@ public sealed class RemoteNotificationsProductTests
             program.IndexOf("--smoke", StringComparison.Ordinal) <
             program.IndexOf("RemoteNotificationShellInstanceLock.Acquire", StringComparison.Ordinal));
         Assert.Contains("RemoteNotificationActivationCoordinator", app, StringComparison.Ordinal);
-        Assert.Contains("mainWindow.OpenRemoteNotificationAsync", app, StringComparison.Ordinal);
-        Assert.Contains("mainWindow.FocusCommandPaletteAsync", app, StringComparison.Ordinal);
-        Assert.Contains("_workspaceOpened.Task", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("FocusCommandPaletteAsync", mainWindow, StringComparison.Ordinal);
-        Assert.Contains("OpenRemoteNotificationAsync", controller, StringComparison.Ordinal);
-        Assert.Contains("ShowToolPageAsync(RemoteNotificationsToolId, \"inbox\")", controller, StringComparison.Ordinal);
+        Assert.Contains("detailOnlyStartup", app, StringComparison.Ordinal);
+        Assert.Contains("mainWindow is null ? null : mainWindow.FocusCommandPaletteAsync", app, StringComparison.Ordinal);
 
         var originalRoot = Path.Combine(Root, "..", "androidtools");
         if (!Directory.Exists(originalRoot))
@@ -515,6 +602,13 @@ public sealed class RemoteNotificationsProductTests
 
     private sealed class FakeStore : IRemoteNotificationsStore
     {
+        private readonly RemoteNotificationsSnapshot _snapshot;
+
+        public FakeStore(RemoteNotificationsSnapshot? snapshot = null)
+        {
+            _snapshot = snapshot ?? new RemoteNotificationsSnapshot([], [], null, false);
+        }
+
         public string? SavedFilter { get; private set; }
         public IReadOnlyList<string> SavedLabels { get; private set; } = [];
         public IReadOnlyList<RemoteNotificationRecord> SavedMessages { get; private set; } = [];
@@ -522,7 +616,7 @@ public sealed class RemoteNotificationsProductTests
         public bool WasCleared { get; private set; }
         public IReadOnlyList<string> SavedSeenIds { get; private set; } = [];
 
-        public RemoteNotificationsSnapshot Load() => new([], [], null, false);
+        public RemoteNotificationsSnapshot Load() => _snapshot;
 
         public void SaveMessages(IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
         {

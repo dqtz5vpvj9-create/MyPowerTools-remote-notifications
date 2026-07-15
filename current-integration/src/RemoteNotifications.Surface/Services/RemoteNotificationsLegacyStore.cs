@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Win32;
 using MyPowerTools.RemoteNotifications.Configuration;
 
-namespace MyPowerTools.Shell.Avalonia.Services;
+namespace RemoteNotifications.Surface.Services;
 
 #if ANDROID_TOOLS_ADAPTER
 internal

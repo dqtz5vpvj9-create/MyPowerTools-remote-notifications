@@ -4,7 +4,7 @@ using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Threading;
 
-namespace MyPowerTools.Shell.Avalonia.Services;
+namespace RemoteNotifications.Surface.Services;
 
 public sealed record RemoteNotificationActivationRequest(
     string MessageId,

@@ -24,7 +24,7 @@
             ],
             "windows": {
               "transport": "named-pipe",
-              "name": "mypowertools.android-tools-suite.powertoold"
+              "name": "mypowertools.android-tools-suite.powertoold.v2"
             }
           },
           {

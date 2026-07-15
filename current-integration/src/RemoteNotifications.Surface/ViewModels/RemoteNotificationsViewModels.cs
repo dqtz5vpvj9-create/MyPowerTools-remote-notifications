@@ -2,11 +2,12 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
 using MyPowerTools.RemoteNotifications.Configuration;
-using MyPowerTools.Shell.Avalonia.Services;
+using RemoteNotifications.Surface.Services;
 
-namespace MyPowerTools.Shell.Avalonia.ViewModels;
+using MyPowerTools.AvaloniaSdk;
+namespace RemoteNotifications.Surface.ViewModels;
 
-public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewModel
+public sealed partial class RemoteNotificationsViewModel : MyPowerTools.AvaloniaSdk.ToolSurfacePageViewModel
 {
     private readonly IRemoteNotificationsStore _store;
     private IRemoteNotificationPoller _poller;
@@ -17,7 +18,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
     private readonly RemoteNotificationSeenIdRing _seenIds;
     private readonly HashSet<string> _unreadLabels = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _pollGate = new(1, 1);
-    private readonly AsyncRelayCommand _retryCommand;
+    private readonly MptAsyncRelayCommand _retryCommand;
     private string? _filterLabel;
     private bool _persistentWindowsToasts;
     private string _connectionState = "starting";
@@ -39,7 +40,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
         : base(
             "Remote Notifications",
             "Signed messages are synchronized automatically and kept in your local notification history.",
-            ToolProductState.Ready)
+            MyPowerTools.AvaloniaSdk.ToolSurfaceState.Ready)
     {
         _settingsStore = settingsStore ?? new RemoteNotificationSettingsStore();
         _settings = _settingsStore.Load();
@@ -58,9 +59,9 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
             _seenIds.TryAccept(message.Id, message.FallbackId);
         }
         Chips = new ObservableCollection<RemoteNotificationLabelChipViewModel>();
-        _retryCommand = new AsyncRelayCommand(RetryAsync, () => !IsPolling);
+        _retryCommand = new MptAsyncRelayCommand(RetryAsync, () => !IsPolling);
         RetryCommand = _retryCommand;
-        ToggleErrorDetailsCommand = new AsyncRelayCommand(() =>
+        ToggleErrorDetailsCommand = new MptAsyncRelayCommand(() =>
         {
             IsErrorDetailsExpanded = !IsErrorDetailsExpanded;
             return Task.CompletedTask;

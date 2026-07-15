@@ -1,10 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="$(MyPowerToolsRepoRoot)\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
-    <ProjectReference Include="$(MyPowerToolsRepoRoot)\src\MyPowerTools.Protocol\MyPowerTools.Protocol.csproj" />
+    <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
+    <PackageReference Include="MyPowerTools.Protocol" Version="0.2.0" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationSettingsStore.cs"
              Link="Configuration\RemoteNotificationSettingsStore.cs" />
+    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationHttpPoller.cs"
+             Link="RemoteNotifications\RemoteNotificationHttpPoller.cs" />
+    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationsLegacyStore.cs"
+             Link="RemoteNotifications\RemoteNotificationsLegacyStore.cs" />
+    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationSeenIdRing.cs"
+             Link="RemoteNotifications\RemoteNotificationSeenIdRing.cs" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -12,13 +19,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DefineConstants>$(DefineConstants);ANDROID_TOOLS_ADAPTER</DefineConstants>
-    <MyPowerToolsRepoRoot Condition="'$(MyPowerToolsRepoRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..\..'))</MyPowerToolsRepoRoot>
     <ModulePackageRoot Condition="'$(ModulePackageRoot)' == ''">$(MSBuildProjectDirectory)\..\..\..\artifacts\package\android-tools-suite</ModulePackageRoot>
   </PropertyGroup>
-
-  <Target Name="ValidateMyPowerToolsRepoRoot" BeforeTargets="ResolveProjectReferences">
-    <Error Condition="!Exists('$(MyPowerToolsRepoRoot)\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj')" Text="MyPowerToolsRepoRoot must point to a MyPowerTools checkout." />
-  </Target>
 
   <Target Name="CopyModuleAssemblyToPackage" AfterTargets="Build">
     <MakeDir Directories="$(ModulePackageRoot)" />

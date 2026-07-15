@@ -52,8 +52,21 @@ internal sealed record AndroidToolsSidecarEndpoint(string PipeName, string Socke
 
     public static AndroidToolsSidecarEndpoint From(IReadOnlyList<string> arguments)
     {
-        var pipeName = DefaultPipeName;
-        var socketPath = DefaultUnixSocketPath();
+        var configuredTransport = Environment.GetEnvironmentVariable("MPT_ENDPOINT_TRANSPORT") ?? "";
+        var configuredAddress = Environment.GetEnvironmentVariable("MPT_ENDPOINT_ADDRESS") ?? "";
+        var pipeName = OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(configuredAddress)
+            ? configuredAddress
+            : DefaultPipeName;
+        var socketPath = !OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(configuredAddress)
+            ? configuredAddress
+            : DefaultUnixSocketPath();
+
+        if (OperatingSystem.IsWindows() &&
+            !string.IsNullOrWhiteSpace(configuredTransport) &&
+            !configuredTransport.Contains("NamedPipe", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unsupported Windows IPC transport '{configuredTransport}'.");
+        }
 
         for (var index = 0; index < arguments.Count; index++)
         {
@@ -528,4 +541,3 @@ public sealed class AndroidToolsModuleControlService : ModuleControl.ModuleContr
         };
     }
 }
-

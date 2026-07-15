@@ -9,6 +9,7 @@ using System.Threading.Channels;
 using MyPowerTools.Protocol;
 using MyPowerTools.Abstractions;
 using MyPowerTools.RemoteNotifications.Configuration;
+using MyPowerTools.Shell.Avalonia.Services;
 
 namespace AndroidTools.MyPowerTools;
 
@@ -420,15 +421,13 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
 
     protected override async IAsyncEnumerable<MptModuleEvent> BuildModuleEventsAsync(EventCursor cursor, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await Task.CompletedTask;
         var seq = Math.Max(1UL, cursor.LastEventSeq);
-        var pollInterval = TimeSpan.FromSeconds(Math.Clamp(
-            SettingsJson.ReadInt(CurrentSettings(), "pollIntervalSeconds") ?? RemoteNotificationSettings.DefaultPollIntervalSeconds,
-            5,
-            3600));
+        var settings = _productSettings.Load();
+        var pollInterval = TimeSpan.FromSeconds(Math.Clamp(settings.PollIntervalSeconds, 5, 3600));
+        var receiver = new RemoteNotificationBackgroundReceiver(settings);
+        string? lastFailure = null;
         var endpoint = CurrentEndpoint();
         var inbox = Shared.NotificationInboxSummary(endpoint, _productSettings.Load().ExpandedPrivateKeyPath);
-        var fingerprint = $"{endpoint.Found}|{endpoint.Message}|{inbox.ToJsonString()}";
         if (cursor.LastEventSeq < 1)
         {
             yield return new MptModuleEvent(
@@ -448,30 +447,47 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
 
         while (true)
         {
-            await Task.Delay(pollInterval, cancellationToken);
-            endpoint = CurrentEndpoint();
-            inbox = Shared.NotificationInboxSummary(endpoint, _productSettings.Load().ExpandedPrivateKeyPath);
-            var nextFingerprint = $"{endpoint.Found}|{endpoint.Message}|{inbox.ToJsonString()}";
-            if (string.Equals(nextFingerprint, fingerprint, StringComparison.Ordinal))
+            var latestSettings = _productSettings.Load();
+            if (latestSettings != settings)
             {
-                continue;
+                settings = latestSettings;
+                pollInterval = TimeSpan.FromSeconds(Math.Clamp(settings.PollIntervalSeconds, 5, 3600));
+                receiver = new RemoteNotificationBackgroundReceiver(settings);
+                lastFailure = null;
             }
 
-            fingerprint = nextFingerprint;
-            seq++;
-            yield return new MptModuleEvent(
-                Id,
-                seq,
-                endpoint.Found ? "message.received" : "server.disconnected",
-                DateTimeOffset.UtcNow,
-                new JsonObject
-                {
-                    ["title"] = "AndroidTools notification endpoint",
-                    ["message"] = endpoint.Message,
-                    ["endpointFound"] = endpoint.Found,
-                    ["legacyHistory"] = inbox["legacyHistory"]!.DeepClone(),
-                    ["sshSigningKey"] = inbox["sshSigningKey"]!.DeepClone()
-                });
+            var poll = await receiver.PollAsync(cancellationToken);
+            var failure = poll.Pull.IsSuccess ? null : $"{poll.Pull.State}|{poll.Pull.Error}";
+            if (poll.Accepted.Count > 0 || failure is not null && !string.Equals(failure, lastFailure, StringComparison.Ordinal))
+            {
+                seq++;
+                var latest = poll.Accepted.LastOrDefault();
+                yield return new MptModuleEvent(
+                    Id,
+                    seq,
+                    poll.Pull.IsSuccess ? "message.received" : "server.disconnected",
+                    DateTimeOffset.UtcNow,
+                    new JsonObject
+                    {
+                        ["title"] = poll.Pull.IsSuccess
+                            ? "Remote notifications synchronized"
+                            : "Remote notification synchronization failed",
+                        ["message"] = poll.Pull.IsSuccess
+                            ? $"Received {poll.Accepted.Count} remote notification(s)."
+                            : poll.Pull.Error,
+                        ["receivedCount"] = poll.Accepted.Count,
+                        ["latestMessageId"] = latest is null
+                            ? ""
+                            : RemoteNotificationsLegacyStore.StableId(latest),
+                        ["messageIds"] = new JsonArray(poll.Accepted
+                            .Select(notification => (JsonNode?)RemoteNotificationsLegacyStore.StableId(notification))
+                            .ToArray()),
+                        ["waterline"] = poll.Waterline
+                    });
+            }
+            lastFailure = failure;
+
+            await Task.Delay(pollInterval, cancellationToken);
         }
     }
 

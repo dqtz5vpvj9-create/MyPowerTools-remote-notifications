@@ -1,4 +1,4 @@
-namespace MyPowerTools.Shell.Avalonia.Services;
+namespace RemoteNotifications.Surface.Services;
 
 #if ANDROID_TOOLS_ADAPTER
 internal

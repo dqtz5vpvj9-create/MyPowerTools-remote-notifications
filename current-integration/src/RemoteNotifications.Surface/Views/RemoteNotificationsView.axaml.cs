@@ -6,10 +6,10 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using MyPowerTools.Shell.Avalonia.Services;
-using MyPowerTools.Shell.Avalonia.ViewModels;
+using RemoteNotifications.Surface.Services;
+using RemoteNotifications.Surface.ViewModels;
 
-namespace MyPowerTools.Shell.Avalonia.Views;
+namespace RemoteNotifications.Surface.Views;
 
 public sealed partial class RemoteNotificationsView : UserControl
 {
