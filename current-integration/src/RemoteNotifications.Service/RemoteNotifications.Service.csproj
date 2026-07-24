@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -11,15 +11,23 @@
     <Description>
       Remote Notifications Service Unit process, supervised by MyPowerTools.ServiceManager.
       Owns the signed-pull polling loop, dedup, persisted history, topic indexing and
-      Windows banner dispatch independently of the Shell and Runner: Shell/Runner restarts
-      never end this process. Provides a named-pipe readiness probe and a heartbeat so the
-      ServiceManager can confirm liveness and re-adopt the still-running process across its
-      own restart.
+      platform-native banner dispatch independently of the Shell and Runner: Shell/Runner
+      restarts never end this process. Provides named-pipe and Unix-domain-socket readiness
+      probes plus a heartbeat so the ServiceManager can confirm liveness and re-adopt the
+      still-running process across its own restart.
     </Description>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Ipc.Shared\MyPowerTools.Ipc.Shared.csproj" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Platform.Abstractions\MyPowerTools.Platform.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Platform.Mac\MyPowerTools.Platform.Mac.csproj" />
   </ItemGroup>
 
   <!-- The worker reuses the real product business logic (no duplication of the signed puller,

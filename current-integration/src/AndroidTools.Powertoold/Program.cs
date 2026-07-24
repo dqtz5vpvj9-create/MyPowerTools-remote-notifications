@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using AndroidTools.MyPowerTools;
 using Grpc.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using MyPowerTools.Ipc;
 using MyPowerTools.Protocol;
 using MyPowerTools.Protocol.Module.V1;
 using CommandParameterDescriptor = MyPowerTools.Abstractions.CommandParameterDescriptor;
@@ -24,6 +25,10 @@ builder.Logging.ClearProviders();
 builder.Services.AddGrpc();
 builder.Services.AddSingleton<AndroidToolsModuleRegistry>();
 builder.Services.AddSingleton<AndroidToolsModuleControlService>();
+if (OperatingSystem.IsWindows())
+{
+    builder.WebHost.UseNamedPipes(MptNamedPipePolicy.Configure);
+}
 builder.WebHost.ConfigureKestrel(options =>
 {
     if (OperatingSystem.IsWindows())

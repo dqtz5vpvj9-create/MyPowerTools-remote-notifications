@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using MyPowerTools.Ipc;
 
 namespace MyPowerTools.Shell.Avalonia.Services;
 
@@ -192,12 +193,10 @@ public sealed class RemoteNotificationActivationPipe : IAsyncDisposable
         {
             try
             {
-                await using var server = new NamedPipeServerStream(
+                await using var server = MptNamedPipePolicy.CreateServer(
                     _pipeName,
                     PipeDirection.In,
-                    1,
-                    PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous);
+                    maxInstances: 1);
                 await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
                 using var memory = new MemoryStream();
                 await server.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);

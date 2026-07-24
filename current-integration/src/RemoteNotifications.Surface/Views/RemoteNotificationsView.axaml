@@ -70,7 +70,7 @@
 
   <Grid MaxWidth="1280"
         HorizontalAlignment="Stretch"
-        RowDefinitions="Auto,Auto,Auto,Auto,*">
+        RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
     <Grid Grid.Row="0"
           ColumnDefinitions="*,320,Auto"
           ColumnSpacing="14"
@@ -160,6 +160,12 @@
                             IsVisible="{Binding IsInboxVisible}"
                             VerticalAlignment="Center" />
       <controls:MptButton
+                          Content="Search"
+                          Click="OnSearchClick"
+                          ToolTip.Tip="Search notification content"
+                          IsVisible="{Binding IsInboxVisible}"
+                          VerticalAlignment="Center" />
+      <controls:MptButton
                           Content="Clear all"
                           Click="OnClearClick"
                           ToolTip.Tip="Remove stored notifications"
@@ -179,6 +185,35 @@
     </Grid>
 
     <Border Grid.Row="1"
+            Margin="0,0,0,8"
+            Padding="12"
+            CornerRadius="{DynamicResource MptRadiusCard}"
+            BorderBrush="{DynamicResource MptBrushBorder}"
+            BorderThickness="1"
+            Background="{DynamicResource MptBrushCardBackground}"
+            IsVisible="{Binding IsSearchVisible}">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto"
+            ColumnSpacing="10">
+        <TextBlock Text="⌕"
+                   FontSize="20"
+                   VerticalAlignment="Center"
+                   AutomationProperties.Name="Search" />
+        <controls:MptTextBox x:Name="SearchBox"
+                             Grid.Column="1"
+                             Text="{Binding SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             PlaceholderText="Search notification content"
+                             KeyDown="OnSearchBoxKeyDown" />
+        <TextBlock Grid.Column="2"
+                   Text="{Binding SearchResultText}"
+                   Classes="MptMeta"
+                   VerticalAlignment="Center" />
+        <controls:MptButton Grid.Column="3"
+                            Content="Close"
+                            Click="OnCloseSearchClick" />
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="2"
             Classes="MptSettingsSection"
             Padding="20"
             CornerRadius="{DynamicResource MptRadiusCard}"
@@ -267,7 +302,7 @@
       </StackPanel>
     </Border>
 
-    <Border Grid.Row="2"
+    <Border Grid.Row="3"
             Padding="{DynamicResource MptUniformL}"
             CornerRadius="{DynamicResource MptRadiusCard}"
             BorderBrush="{DynamicResource MptBrushDanger}"
@@ -316,7 +351,7 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="3"
+    <Border Grid.Row="4"
             Padding="0,8"
             BorderBrush="{DynamicResource MptBrushDivider}"
             BorderThickness="0,1,0,1"
@@ -325,6 +360,7 @@
         <ScrollViewer x:Name="LabelScroller"
                       HorizontalScrollBarVisibility="Hidden"
                       VerticalScrollBarVisibility="Disabled"
+                      PointerWheelChanged="OnLabelScrollerPointerWheelChanged"
                       PointerPressed="OnLabelScrollerPointerPressed"
                       PointerMoved="OnLabelScrollerPointerMoved"
                       PointerReleased="OnLabelScrollerPointerReleased"
@@ -350,7 +386,7 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="4"
+    <Grid Grid.Row="5"
           Margin="0,4,0,0"
           MinHeight="280"
           IsVisible="{Binding IsInboxVisible}">

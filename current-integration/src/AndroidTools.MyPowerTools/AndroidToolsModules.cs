@@ -364,7 +364,7 @@ public sealed class AndroidToolsRemoteCommandsModule : AndroidToolsModuleBase
 
 public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
 {
-    private readonly IRemoteNotificationSettingsStore _productSettings = new RemoteNotificationSettingsStore();
+    private readonly RemoteNotificationSettingsStore _productSettings = new();
 
     public override string Id => "android-tools.notifications";
     public override string DisplayName => "Remote Notifications";
@@ -545,11 +545,15 @@ public sealed class AndroidToolsNotificationsModule : AndroidToolsModuleBase
 
     private NotificationEndpoint CurrentEndpoint()
     {
-        var settings = _productSettings.Load();
-        var validation = settings.Validate();
-        return !validation.IsValid
+        var validation = _productSettings.LoadValidation();
+        return !validation.IsValid || validation.Settings is null
             ? NotificationEndpoint.Missing(validation.Error)
-            : new NotificationEndpoint(true, settings.Protocol, settings.Host, settings.Port, $"Endpoint {settings.Endpoint} loaded from Remote Notifications settings.");
+            : new NotificationEndpoint(
+                true,
+                validation.Settings.Protocol,
+                validation.Settings.Host,
+                validation.Settings.Port,
+                $"Endpoint {validation.Settings.Endpoint} loaded from Remote Notifications settings.");
     }
 
     private static JsonObject DefaultNotificationSettings(RemoteNotificationSettings settings)

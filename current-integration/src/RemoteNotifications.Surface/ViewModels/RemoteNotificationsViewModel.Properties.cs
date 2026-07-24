@@ -17,23 +17,72 @@ public sealed partial class RemoteNotificationsViewModel
     public string FilterLabel => _filterLabel ?? RemoteNotificationsLegacyStore.FilterAll;
     public int TotalCount => Messages.Count;
 
-    public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages => _filterLabel is null
-        ? Messages
-        : Messages.Where(message => string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)).ToArray();
+    public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages
+    {
+        get
+        {
+            var query = SearchQuery.Trim();
+            if (_filterLabel is null && query.Length == 0)
+            {
+                return Messages;
+            }
+
+            return Messages
+                .Where(message =>
+                    (_filterLabel is null || string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)) &&
+                    (query.Length == 0 || message.MatchesSearch(query)))
+                .ToArray();
+        }
+    }
 
     public bool HasVisibleMessages => VisibleMessages.Count > 0;
     public bool ShowsEmptyOverlay => !HasVisibleMessages;
-    public string EmptyOverlayText => _filterLabel is not null && Messages.Count > 0
-        ? $"No notifications match filter “{_filterLabel}”"
-        : "Waiting for notifications…";
+    public string EmptyOverlayText => HasSearchQuery
+        ? $"No notifications contain “{SearchQuery.Trim()}”"
+        : _filterLabel is not null && Messages.Count > 0
+            ? $"No notifications match filter “{_filterLabel}”"
+            : "Waiting for notifications…";
+
+    public bool IsSearchVisible
+    {
+        get => _isSearchVisible;
+        private set => SetProperty(ref _isSearchVisible, value);
+    }
+
+    public string SearchQuery
+    {
+        get => _searchQuery;
+        set
+        {
+            if (!SetProperty(ref _searchQuery, value ?? ""))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(HasSearchQuery));
+            NotifyMessageViewChanged();
+        }
+    }
+
+    public bool HasSearchQuery => !string.IsNullOrWhiteSpace(SearchQuery);
+
+    public string SearchResultText
+    {
+        get
+        {
+            var count = VisibleMessages.Count;
+            return $"{count.ToString(CultureInfo.InvariantCulture)} result{(count == 1 ? "" : "s")}";
+        }
+    }
 
     public string MessageCountText
     {
         get
         {
-            var count = _filterLabel is null ? Messages.Count : VisibleMessages.Count;
+            var isFiltered = _filterLabel is not null || HasSearchQuery;
+            var count = isFiltered ? VisibleMessages.Count : Messages.Count;
             var suffix = count == 1 ? "" : "s";
-            return _filterLabel is null
+            return !isFiltered
                 ? $"{count.ToString(CultureInfo.InvariantCulture)} message{suffix}"
                 : $"{count.ToString(CultureInfo.InvariantCulture)} of {Messages.Count.ToString(CultureInfo.InvariantCulture)} message{suffix}";
         }

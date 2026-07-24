@@ -3,6 +3,8 @@ param(
     [string]$MyPowerToolsRepoRoot = '',
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
+    [ValidateSet('win-x64', 'win-arm64', 'osx-arm64', 'osx-x64', 'linux-x64')]
+    [string]$RuntimeIdentifier = 'win-x64',
     [string]$OutputRoot = ''
 )
 
@@ -48,11 +50,18 @@ if ($LASTEXITCODE -ne 0) {
     throw "Adapter build failed with exit code $LASTEXITCODE"
 }
 
-$runtimeRoot = Join-Path $OutputRoot 'windows\x64'
+$runtimePath = switch ($RuntimeIdentifier) {
+    'win-x64' { @('windows', 'x64') }
+    'win-arm64' { @('windows', 'arm64') }
+    'osx-arm64' { @('macos', 'arm64') }
+    'osx-x64' { @('macos', 'x64') }
+    'linux-x64' { @('linux', 'x64') }
+}
+$runtimeRoot = Join-Path (Join-Path $OutputRoot $runtimePath[0]) $runtimePath[1]
 $runtimeArguments = @(
     'publish', $runtimeProject,
     '-c', $Configuration,
-    '-r', 'win-x64',
+    '-r', $RuntimeIdentifier,
     '--self-contained', 'true',
     '--output', $runtimeRoot,
     "/p:MyPowerToolsRepoRoot=$MyPowerToolsRepoRoot",
@@ -61,7 +70,7 @@ $runtimeArguments = @(
 )
 & dotnet @runtimeArguments
 if ($LASTEXITCODE -ne 0) {
-    throw "Self-contained Windows runtime publish failed with exit code $LASTEXITCODE"
+    throw "Self-contained runtime publish for $RuntimeIdentifier failed with exit code $LASTEXITCODE"
 }
 
 Write-Host $OutputRoot

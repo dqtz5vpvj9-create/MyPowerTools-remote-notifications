@@ -64,7 +64,7 @@ internal static class WorkerToastPlatform
     }
 
     [SupportedOSPlatform("windows")]
-    private static void EnsureRegistered()
+    internal static void EnsureRegistered()
     {
         lock (SetupGate)
         {
@@ -73,20 +73,20 @@ internal static class WorkerToastPlatform
                 return;
             }
 
-            var executable = ResolveExecutable();
+            var workerExecutable = ResolveExecutable();
             Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(AppUserModelId));
-            EnsureStartMenuShortcut(executable);
-            RegisterProtocol(executable);
+            EnsureStartMenuShortcut(workerExecutable);
+            RegisterProtocol(workerExecutable);
             _setupComplete = true;
         }
     }
 
     private static string ResolveExecutable()
     {
-        var assemblyPath = typeof(WorkerToastPlatform).Assembly.Location;
-        if (!string.IsNullOrWhiteSpace(assemblyPath))
+        var assemblyName = typeof(WorkerToastPlatform).Assembly.GetName().Name;
+        if (!string.IsNullOrWhiteSpace(assemblyName))
         {
-            var appHost = Path.ChangeExtension(assemblyPath, ".exe");
+            var appHost = Path.Combine(AppContext.BaseDirectory, $"{assemblyName}.exe");
             if (File.Exists(appHost))
             {
                 return appHost;
@@ -127,25 +127,31 @@ internal static class WorkerToastPlatform
             "MyPowerTools");
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, "MyPowerTools.lnk");
+        var shortcutExists = File.Exists(path);
         var link = (IShellLinkW)(object)new ShellLink();
         try
         {
             var persist = (IPersistFile)link;
-            if (File.Exists(path))
+            if (shortcutExists)
             {
                 persist.Load(path, 2);
             }
-
-            link.SetPath(executable);
-            link.SetWorkingDirectory(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory);
-            link.SetDescription("MyPowerTools");
-            link.SetIconLocation(executable, 0);
+            else
+            {
+                link.SetPath(executable);
+                link.SetWorkingDirectory(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory);
+                link.SetDescription("MyPowerTools");
+                link.SetIconLocation(executable, 0);
+            }
 
             var propertyStore = (IPropertyStore)link;
             SetStringProperty(propertyStore, PropertyKeys.AppUserModelId, AppUserModelId);
-            SetStringProperty(propertyStore, PropertyKeys.RelaunchCommand, $"\"{executable}\"");
-            SetStringProperty(propertyStore, PropertyKeys.RelaunchDisplayNameResource, "MyPowerTools");
-            SetStringProperty(propertyStore, PropertyKeys.RelaunchIconResource, $"{executable},0");
+            if (!shortcutExists)
+            {
+                SetStringProperty(propertyStore, PropertyKeys.RelaunchCommand, $"\"{executable}\"");
+                SetStringProperty(propertyStore, PropertyKeys.RelaunchDisplayNameResource, "MyPowerTools");
+                SetStringProperty(propertyStore, PropertyKeys.RelaunchIconResource, $"{executable},0");
+            }
             Marshal.ThrowExceptionForHR(propertyStore.Commit());
             persist.Save(path, true);
         }

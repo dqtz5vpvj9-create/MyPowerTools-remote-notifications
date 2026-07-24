@@ -25,5 +25,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="MyPowerTools.Tests" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Ipc.Shared\MyPowerTools.Ipc.Shared.csproj" />
   </ItemGroup>
 </Project>

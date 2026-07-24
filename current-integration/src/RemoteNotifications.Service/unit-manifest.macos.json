@@ -1,0 +1,33 @@
+{
+  "id": "remote-notifications.service",
+  "toolId": "remote-notifications",
+  "displayName": "Remote Notifications Service",
+  "exec": "../../RemoteNotifications.Service",
+  "arguments": [
+    "--socket",
+    "$TMPDIR/mypowertools/remote-notifications.core.sock",
+    "--heartbeat-file",
+    "~/Library/Application Support/MyPowerTools/state/remote-notifications.heartbeat",
+    "--instance-token",
+    "remote-notifications-service-v1"
+  ],
+  "workingDirectory": "",
+  "environment": {
+    "RemoteNotifications__Transport": "unix-domain-socket",
+    "RemoteNotifications__UnixSocket__Path": "$TMPDIR/mypowertools/remote-notifications.core.sock",
+    "MPT_TOOL_DATA_ROOT": "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications"
+  },
+  "autostart": true,
+  "restartPolicy": { "maxRestarts": 5, "backoffMs": 2000 },
+  "readiness": {
+    "kind": "unix-socket",
+    "address": "$TMPDIR/mypowertools/remote-notifications.core.sock",
+    "timeoutMs": 8000
+  },
+  "stopTimeoutMs": 5000,
+  "dataRoots": [
+    "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications"
+  ],
+  "dependsOn": [],
+  "instanceToken": "remote-notifications-service-v1"
+}

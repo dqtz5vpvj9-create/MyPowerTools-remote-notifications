@@ -1,9 +1,14 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Security;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using MyPowerTools.Ipc;
+using MyPowerTools.Abstractions;
+using MyPowerTools.Platform.Abstractions;
+using MyPowerTools.Platform.Mac;
 using MyPowerTools.RemoteNotifications.Configuration;
 using RemoteNotifications.Surface.Services;
 using RemoteNotifications.Service;
@@ -11,7 +16,7 @@ using RemoteNotifications.Service;
 // Remote Notifications Service Unit — supervised by MyPowerTools.ServiceManager.
 //
 // Role: own the long-running signed-pull polling loop, dedup, persisted history,
-// topic/label indexing and Windows banner dispatch with a life independent of the
+// topic/label indexing and platform-native banner dispatch with a life independent of the
 // Shell and the Runner. Before this process existed the poll loop lived inside the
 // Surface/module adapter and stopped whenever the Shell window closed or the Runner
 // recycled; notifications delivered while no UI was open were lost. This worker keeps
@@ -19,15 +24,44 @@ using RemoteNotifications.Service;
 // and raises a Windows toast, so a message delivered while the Shell is minimized to the
 // tray or fully closed is still recorded and surfaced on next open.
 //
-// Transport: a named pipe (default `remote-notifications.core`) speaks the same
-// length-prefixed binary-JSON framing as the ScreenEase Service Unit so the
-// ServiceManager's `pipe` readiness probe and future command proxying reuse one wire
-// shape. Supported commands: `ping` (readiness), `state`/`get_state` (status snapshot),
+// Transport: Windows uses a named pipe and macOS uses a Unix domain socket. Both speak
+// the same length-prefixed binary-JSON framing so the ServiceManager readiness probe and
+// command proxying reuse one wire shape. Supported commands: `ping` (readiness),
+// `state`/`get_state` (status snapshot),
 // `inject` (drop a unique test message into the history — used by the process tests and
 // the Shell "trigger test message" acceptance).
 
+var activationUri = ProductActivationLauncher.GetLaunchUri(args);
+if (!string.IsNullOrWhiteSpace(activationUri))
+{
+    return ProductActivationLauncher.TryLaunch(activationUri) ? 0 : 2;
+}
+
+if (OperatingSystem.IsWindows())
+{
+    try
+    {
+        // Installation and upgrade can replace the worker before the next banner arrives.
+        // Register the protocol at service startup so every existing toast stays actionable.
+        WorkerToastPlatform.EnsureRegistered();
+    }
+    catch (Exception exception)
+    {
+        try { Console.Error.WriteLine($"Remote Notifications activation registration failed: {exception.Message}"); }
+        catch { }
+    }
+}
+
 var pipeName = GetOption(args, "--pipe") ?? "remote-notifications.core";
+var socketPath = GetOption(args, "--socket");
+if (!OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(socketPath))
+{
+    socketPath = Path.Combine(Path.GetTempPath(), "mypowertools", "remote-notifications.core.sock");
+}
 var heartbeatFile = GetOption(args, "--heartbeat-file");
+INotificationService? desktopNotifications = OperatingSystem.IsMacOS()
+    ? new MacUserNotificationService()
+    : null;
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -38,12 +72,14 @@ Console.CancelKeyPress += (_, e) =>
 AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
 
 var pid = Environment.ProcessId;
-Console.WriteLine($"RemoteNotifications.Service starting pid={pid} pipe={pipeName}");
+Console.WriteLine($"RemoteNotifications.Service starting pid={pid} endpoint={socketPath ?? pipeName}");
 
 var state = new WorkerState();
 var pollGate = new object();
 var pipeCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-_ = Task.Run(() => ServeControlPipe(pipeName, state, pollGate, pipeCts.Token));
+_ = Task.Run(() => socketPath is null
+    ? ServeControlPipe(pipeName, state, pollGate, desktopNotifications, pipeCts.Token)
+    : ServeControlSocket(socketPath, state, pollGate, desktopNotifications, pipeCts.Token));
 
 // Polling loop: drives the real signed-pull, dedup, persistence and banner path.
 // Settings are reloaded every cycle so the operator can change endpoint, channel,
@@ -57,7 +93,7 @@ try
         {
             lock (pollGate)
             {
-                RunOnePollCycle(state);
+                RunOnePollCycle(state, desktopNotifications);
             }
         }
         catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
@@ -102,7 +138,7 @@ return 0;
 // Single poll cycle. Mirrors RemoteNotificationBackgroundReceiver.PollAsync plus the
 // Surface banner dispatch, consolidated into one owned path.
 // ---------------------------------------------------------------------------
-static void RunOnePollCycle(WorkerState state)
+static void RunOnePollCycle(WorkerState state, INotificationService? desktopNotifications)
 {
     var settingsStore = new RemoteNotificationSettingsStore();
     var settings = settingsStore.Load();
@@ -173,16 +209,19 @@ static void RunOnePollCycle(WorkerState state)
     }
     store.SaveKnownLabels(labels);
 
-    var shown = DispatchBanners(accepted, settings.KeepWindowsBanners);
+    var shown = DispatchBanners(accepted, settings.KeepWindowsBanners, desktopNotifications);
     state.RecordPoll(pull.State, pull.Error, pull.Notifications.Count, accepted.Count, shown);
 }
 
 // Banner dispatch. On Windows, send a real toast via the same COM ABI the Surface uses.
 // The worker runs with no Avalonia lifetime, so it constructs the Windows platform
 // directly rather than through the Surface factory that checks for a desktop lifetime.
-static int DispatchBanners(IReadOnlyList<RemoteNotificationRecord> accepted, bool keepWindowsBanners)
+static int DispatchBanners(
+    IReadOnlyList<RemoteNotificationRecord> accepted,
+    bool keepWindowsBanners,
+    INotificationService? desktopNotifications)
 {
-    if (!OperatingSystem.IsWindows())
+    if (!OperatingSystem.IsWindows() && desktopNotifications is null)
     {
         return 0;
     }
@@ -193,9 +232,28 @@ static int DispatchBanners(IReadOnlyList<RemoteNotificationRecord> accepted, boo
         var envelope = BuildToastEnvelope(notification, persistent: keepWindowsBanners);
         try
         {
-            var result = WorkerToastPlatform.Show(envelope);
-            if (result.Shown)
+            if (OperatingSystem.IsWindows())
             {
+                var result = WorkerToastPlatform.Show(envelope);
+                if (result.Shown)
+                {
+                    shown++;
+                }
+            }
+            else if (desktopNotifications is not null)
+            {
+                var productActivationUri = ToolActivationProtocol.CreateProductActivationUri(
+                    new ToolActivationRequest("remote-notifications", "inbox", envelope.LaunchUri)
+                    {
+                        SuppressShellWindow = true
+                    });
+                desktopNotifications.PublishAsync(
+                    new DesktopNotificationRequest(
+                        envelope.MessageId,
+                        envelope.Title,
+                        envelope.Body,
+                        productActivationUri.AbsoluteUri),
+                    CancellationToken.None).GetAwaiter().GetResult();
                 shown++;
             }
         }
@@ -256,6 +314,7 @@ static async Task ServeControlPipe(
     string name,
     WorkerState state,
     object pollGate,
+    INotificationService? desktopNotifications,
     CancellationToken cancellationToken)
 {
     while (!cancellationToken.IsCancellationRequested)
@@ -263,42 +322,10 @@ static async Task ServeControlPipe(
         NamedPipeServerStream? server = null;
         try
         {
-            server = new NamedPipeServerStream(
-                name,
-                PipeDirection.InOut,
-                NamedPipeServerStream.MaxAllowedServerInstances,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            server = MptNamedPipePolicy.CreateServer(name);
             await server.WaitForConnectionAsync(cancellationToken);
 
-            while (server.IsConnected && !cancellationToken.IsCancellationRequested)
-            {
-                var request = await ReadFramedMessageAsync(server, cancellationToken);
-                if (request is null)
-                {
-                    break; // client closed
-                }
-
-                var command = ExtractCommand(request);
-                object? data = command switch
-                {
-                    "ping" => new { pong = true },
-                    "state" or "get_state" => state.ToStateObject(),
-                    "poll" => HandlePoll(state, pollGate),
-                    "inject" => HandleInject(request, state, pollGate),
-                    _ => null
-                };
-
-                var ok = data is not null;
-                var response = new
-                {
-                    ok,
-                    command,
-                    data,
-                    error = ok ? null : $"Unknown command '{command}'."
-                };
-                await WriteFramedMessageAsync(server, response, cancellationToken);
-            }
+            await ServeControlClient(server, state, pollGate, desktopNotifications, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -315,14 +342,98 @@ static async Task ServeControlPipe(
     }
 }
 
+static async Task ServeControlSocket(
+    string path,
+    WorkerState state,
+    object pollGate,
+    INotificationService? desktopNotifications,
+    CancellationToken cancellationToken)
+{
+    path = Path.GetFullPath(path);
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    if (File.Exists(path))
+    {
+        File.Delete(path);
+    }
+
+    using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+    listener.Bind(new UnixDomainSocketEndPoint(path));
+    listener.Listen(8);
+    try
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var client = await listener.AcceptAsync(cancellationToken);
+                await using var stream = new NetworkStream(client, ownsSocket: false);
+                await ServeControlClient(stream, state, pollGate, desktopNotifications, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                try { Console.Error.WriteLine($"RemoteNotifications.Service socket error: {ex.Message}"); } catch { }
+            }
+        }
+    }
+    finally
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+}
+
+static async Task ServeControlClient(
+    Stream stream,
+    WorkerState state,
+    object pollGate,
+    INotificationService? desktopNotifications,
+    CancellationToken cancellationToken)
+{
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        var request = await ReadFramedMessageAsync(stream, cancellationToken);
+        if (request is null)
+        {
+            return;
+        }
+
+        var command = ExtractCommand(request);
+        object? data = command switch
+        {
+            "ping" => new { pong = true },
+            "state" or "get_state" => state.ToStateObject(),
+            "poll" => HandlePoll(state, pollGate, desktopNotifications),
+            "inject" => HandleInject(request, state, pollGate),
+            _ => null
+        };
+        var ok = data is not null;
+        await WriteFramedMessageAsync(stream, new
+        {
+            ok,
+            command,
+            data,
+            error = ok ? null : $"Unknown command '{command}'."
+        }, cancellationToken);
+    }
+}
+
 // `inject` writes a unique test message straight into the persisted history so the
 // process tests and the Shell "trigger test message" acceptance can prove the worker
 // owns persistence and the Surface reads it back without any UI involvement.
-static object HandlePoll(WorkerState state, object pollGate)
+static object HandlePoll(
+    WorkerState state,
+    object pollGate,
+    INotificationService? desktopNotifications)
 {
     lock (pollGate)
     {
-        RunOnePollCycle(state);
+        RunOnePollCycle(state, desktopNotifications);
         return state.ToStateObject();
     }
 }

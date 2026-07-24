@@ -18,11 +18,6 @@ public sealed class RemoteNotificationsSurfaceFactory : IMptAvaloniaSurfaceFacto
 {
     public Control CreateSurface(MptAvaloniaSurfaceContext context)
     {
-        return CreateAsync(context).GetAwaiter().GetResult();
-    }
-
-    private static Task<UserControl> CreateAsync(MptAvaloniaSurfaceContext context)
-    {
         var settingsStore = new RemoteNotificationSettingsStore(
             Path.Combine(context.DataDirectory, "settings.json"));
         var store = new RemoteNotificationsLegacyStore(settingsStore, context.DataDirectory);
@@ -45,7 +40,7 @@ public sealed class RemoteNotificationsSurfaceFactory : IMptAvaloniaSurfaceFacto
             serviceClient: serviceClient);
         Info(context, $"Remote Notifications loaded: {viewModel.MessageCountText}.");
 
-        return Task.FromResult<UserControl>(new RemoteNotificationsView { DataContext = viewModel });
+        return new RemoteNotificationsView { DataContext = viewModel };
     }
 
     private static void Info(MptAvaloniaSurfaceContext context, string message)

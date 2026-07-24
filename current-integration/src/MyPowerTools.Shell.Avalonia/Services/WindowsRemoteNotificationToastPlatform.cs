@@ -116,28 +116,31 @@ public sealed class WindowsRemoteNotificationToastPlatform : IRemoteNotification
             "MyPowerTools");
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, "MyPowerTools.lnk");
+        var shortcutExists = File.Exists(path);
         var link = (IShellLinkW)(object)new ShellLink();
         try
         {
             var persist = (IPersistFile)link;
-            if (File.Exists(path))
+            if (shortcutExists)
             {
                 persist.Load(path, 2);
             }
-
-            // Refresh an existing link as well. Development, package updates and
-            // rollback can move the apphost; a stale shortcut breaks the AUMID
-            // association even though the protocol registration is current.
-            link.SetPath(executable);
-            link.SetWorkingDirectory(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory);
-            link.SetDescription("MyPowerTools");
-            link.SetIconLocation(executable, 0);
+            else
+            {
+                link.SetPath(executable);
+                link.SetWorkingDirectory(Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory);
+                link.SetDescription("MyPowerTools");
+                link.SetIconLocation(executable, 0);
+            }
 
             var propertyStore = (IPropertyStore)link;
             SetStringProperty(propertyStore, PropertyKeys.AppUserModelId, AppUserModelId);
-            SetStringProperty(propertyStore, PropertyKeys.RelaunchCommand, $"\"{executable}\"");
-            SetStringProperty(propertyStore, PropertyKeys.RelaunchDisplayNameResource, "MyPowerTools");
-            SetStringProperty(propertyStore, PropertyKeys.RelaunchIconResource, $"{executable},0");
+            if (!shortcutExists)
+            {
+                SetStringProperty(propertyStore, PropertyKeys.RelaunchCommand, $"\"{executable}\"");
+                SetStringProperty(propertyStore, PropertyKeys.RelaunchDisplayNameResource, "MyPowerTools");
+                SetStringProperty(propertyStore, PropertyKeys.RelaunchIconResource, $"{executable},0");
+            }
             Marshal.ThrowExceptionForHR(propertyStore.Commit());
             persist.Save(path, true);
         }

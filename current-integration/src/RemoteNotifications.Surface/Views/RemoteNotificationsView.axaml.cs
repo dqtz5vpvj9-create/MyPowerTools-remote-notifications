@@ -6,12 +6,14 @@ using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using MyPowerTools.Abstractions;
+using MyPowerTools.AvaloniaSdk;
 using RemoteNotifications.Surface.Services;
 using RemoteNotifications.Surface.ViewModels;
 
 namespace RemoteNotifications.Surface.Views;
 
-public sealed partial class RemoteNotificationsView : UserControl
+public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaSurfaceActivationHandler
 {
     private ScrollViewer? _hostScroller;
     private RemoteNotificationsViewModel? _subscribedViewModel;
@@ -156,6 +158,28 @@ public sealed partial class RemoteNotificationsView : UserControl
         _labelDragActive = false;
     }
 
+    private void OnLabelScrollerPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (sender is not ScrollViewer scroller)
+        {
+            return;
+        }
+
+        var wheelDelta = e.Delta.Y != 0 ? e.Delta.Y : e.Delta.X;
+        var horizontalOffset = RemoteNotificationLabelWheel.CalculateOffset(
+            scroller.Offset.X,
+            wheelDelta,
+            scroller.Extent.Width,
+            scroller.Viewport.Width);
+        if (Math.Abs(horizontalOffset - scroller.Offset.X) < double.Epsilon)
+        {
+            return;
+        }
+
+        scroller.Offset = new Vector(horizontalOffset, scroller.Offset.Y);
+        e.Handled = true;
+    }
+
     private void OnLabelScrollerPointerMoved(object? sender, PointerEventArgs e)
     {
         if (sender is not ScrollViewer scroller ||
@@ -216,10 +240,42 @@ public sealed partial class RemoteNotificationsView : UserControl
             return;
         }
 
-        ShellCommandFaultBoundary.Run(
+        MptCommandFaultBoundary.Run(
             this,
             "Clear remote notifications",
             () => ClearMessagesAsync(viewModel));
+    }
+
+    private void OnSearchClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not RemoteNotificationsViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.OpenSearch();
+        Dispatcher.UIThread.Post(() =>
+        {
+            var searchBox = this.FindControl<TextBox>("SearchBox");
+            searchBox?.Focus();
+            searchBox?.SelectAll();
+        }, DispatcherPriority.Input);
+    }
+
+    private void OnCloseSearchClick(object? sender, RoutedEventArgs e)
+    {
+        (DataContext as RemoteNotificationsViewModel)?.CloseSearch();
+    }
+
+    private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || DataContext is not RemoteNotificationsViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.CloseSearch();
+        e.Handled = true;
     }
 
     private async Task ClearMessagesAsync(RemoteNotificationsViewModel viewModel)
@@ -252,7 +308,7 @@ public sealed partial class RemoteNotificationsView : UserControl
         }
 
         e.Handled = true;
-        ShellCommandFaultBoundary.Run(
+        MptCommandFaultBoundary.Run(
             this,
             "Open remote notification details",
             () =>
@@ -275,6 +331,17 @@ public sealed partial class RemoteNotificationsView : UserControl
         return _detailWindows.Open(message);
     }
 
+    public ValueTask<bool> ActivateAsync(
+        ToolActivationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var activation = RemoteNotificationActivationProtocol.ParseLaunchUri(request.ActivationUri);
+        return ValueTask.FromResult(
+            !string.IsNullOrWhiteSpace(activation.MessageId) &&
+            TryOpenMessageById(activation.MessageId));
+    }
+
     private void OnMessageContextRequested(object? sender, ContextRequestedEventArgs e)
     {
         if (sender is not Control { DataContext: RemoteNotificationMessageViewModel message } control)
@@ -283,7 +350,7 @@ public sealed partial class RemoteNotificationsView : UserControl
         }
 
         var copy = new MenuItem { Header = "Copy message" };
-        copy.Click += (_, _) => ShellCommandFaultBoundary.Run(
+        copy.Click += (_, _) => MptCommandFaultBoundary.Run(
             this,
             "Copy remote notification",
             () => CopyMessageAsync(message.Message));
@@ -344,5 +411,20 @@ public static class RemoteNotificationLabelDrag
     {
         var maximum = Math.Max(0, extent - viewport);
         return Math.Clamp(startOffset - pointerDelta, 0, maximum);
+    }
+}
+
+public static class RemoteNotificationLabelWheel
+{
+    public const double ScrollStep = 72;
+
+    public static double CalculateOffset(
+        double currentOffset,
+        double wheelDelta,
+        double extent,
+        double viewport)
+    {
+        var maximum = Math.Max(0, extent - viewport);
+        return Math.Clamp(currentOffset - (wheelDelta * ScrollStep), 0, maximum);
     }
 }

@@ -171,9 +171,17 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
 
     public RemoteNotificationSettings Load()
     {
+        var validation = LoadValidation();
+        return validation.IsValid && validation.Settings is not null
+            ? validation.Settings
+            : RemoteNotificationSettings.Default;
+    }
+
+    public RemoteNotificationSettingsValidation LoadValidation()
+    {
         if (!File.Exists(SettingsPath))
         {
-            return RemoteNotificationSettings.Default;
+            return RemoteNotificationSettingsValidation.Succeeded(RemoteNotificationSettings.Default);
         }
 
         try
@@ -183,15 +191,15 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
                 JsonOptions);
             if (loaded is null)
             {
-                return RemoteNotificationSettings.Default;
+                return RemoteNotificationSettingsValidation.Failed("Remote notification settings are empty.");
             }
 
             var normalized = loaded.Normalize();
-            return normalized.Validate().IsValid ? normalized : RemoteNotificationSettings.Default;
+            return normalized.Validate();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            return RemoteNotificationSettings.Default;
+            return RemoteNotificationSettingsValidation.Failed($"Remote notification settings could not be read: {exception.Message}");
         }
     }
 

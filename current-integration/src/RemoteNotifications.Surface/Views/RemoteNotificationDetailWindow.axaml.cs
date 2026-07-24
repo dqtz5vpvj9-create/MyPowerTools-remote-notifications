@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
+using MyPowerTools.AvaloniaSdk;
 using RemoteNotifications.Surface.ViewModels;
 
 namespace RemoteNotifications.Surface.Views;
@@ -29,7 +30,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             return;
         }
 
-        ShellCommandFaultBoundary.Run(
+        MptCommandFaultBoundary.Run(
             this,
             "Copy remote notification details",
             async () =>

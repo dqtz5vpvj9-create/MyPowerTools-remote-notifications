@@ -104,6 +104,11 @@ public sealed class RemoteNotificationMessageViewModel : MyPowerTools.AvaloniaSd
         RelativeTime = FormatRelativeTimestamp(Timestamp).Display;
     }
 
+    public bool MatchesSearch(string query)
+    {
+        return query.Length == 0 || Message.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static (string Display, string Tooltip) FormatRelativeTimestamp(string timestamp)
     {
         var now = DateTimeOffset.Now;

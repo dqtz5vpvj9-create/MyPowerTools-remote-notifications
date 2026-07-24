@@ -30,6 +30,8 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private string _latest = "never";
     private string _lastError = "none";
     private bool _isErrorDetailsExpanded;
+    private bool _isSearchVisible;
+    private string _searchQuery = "";
     private string _waterline;
     private CancellationTokenSource? _serviceRefreshCancellation;
 
@@ -103,6 +105,17 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
         cancellation.Cancel();
         cancellation.Dispose();
+    }
+
+    public void OpenSearch()
+    {
+        IsSearchVisible = true;
+    }
+
+    public void CloseSearch()
+    {
+        SearchQuery = "";
+        IsSearchVisible = false;
     }
 
     public async Task<int> PresentPersistedAsync(
@@ -459,6 +472,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         OnPropertyChanged(nameof(ShowsEmptyOverlay));
         OnPropertyChanged(nameof(EmptyOverlayText));
         OnPropertyChanged(nameof(MessageCountText));
+        OnPropertyChanged(nameof(SearchResultText));
     }
 
     private static bool IsSaneNotification(RemoteNotificationRecord notification)

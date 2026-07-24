@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Text.Json;
 using MyPowerTools.Abstractions;
 
@@ -41,7 +42,7 @@ public sealed class RemoteNotificationsServiceClient : IRemoteNotificationsServi
         CancellationToken cancellationToken = default)
     {
         var unit = await EnsureRunningAsync(cancellationToken).ConfigureAwait(false);
-        using var response = await SendAsync(ResolvePipeName(unit), "state", cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(unit, "state", cancellationToken).ConfigureAwait(false);
         return ParseState(response.RootElement.GetProperty("data"));
     }
 
@@ -49,7 +50,7 @@ public sealed class RemoteNotificationsServiceClient : IRemoteNotificationsServi
         CancellationToken cancellationToken = default)
     {
         var unit = await EnsureRunningAsync(cancellationToken).ConfigureAwait(false);
-        using var response = await SendAsync(ResolvePipeName(unit), "poll", cancellationToken).ConfigureAwait(false);
+        using var response = await SendAsync(unit, "poll", cancellationToken).ConfigureAwait(false);
         return ParseState(response.RootElement.GetProperty("data"));
     }
 
@@ -86,29 +87,24 @@ public sealed class RemoteNotificationsServiceClient : IRemoteNotificationsServi
     }
 
     private static async Task<JsonDocument> SendAsync(
-        string pipeName,
+        ServiceUnitSnapshot unit,
         string command,
         CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
 
-        await using var pipe = new NamedPipeClientStream(
-            ".",
-            pipeName,
-            PipeDirection.InOut,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
+        await using var stream = await ConnectAsync(unit, timeout.Token).ConfigureAwait(false);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(new { command });
         var header = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
-        await pipe.WriteAsync(header, timeout.Token).ConfigureAwait(false);
-        await pipe.WriteAsync(payload, timeout.Token).ConfigureAwait(false);
-        await pipe.FlushAsync(timeout.Token).ConfigureAwait(false);
+        await stream.WriteAsync(header, timeout.Token).ConfigureAwait(false);
+        await stream.WriteAsync(payload, timeout.Token).ConfigureAwait(false);
+        await stream.FlushAsync(timeout.Token).ConfigureAwait(false);
 
         var responseHeader = new byte[4];
-        await ReadExactlyAsync(pipe, responseHeader, timeout.Token).ConfigureAwait(false);
+        await ReadExactlyAsync(stream, responseHeader, timeout.Token).ConfigureAwait(false);
         var length = BinaryPrimitives.ReadInt32LittleEndian(responseHeader);
         if (length <= 0 || length > 1024 * 1024)
         {
@@ -116,7 +112,7 @@ public sealed class RemoteNotificationsServiceClient : IRemoteNotificationsServi
         }
 
         var responsePayload = new byte[length];
-        await ReadExactlyAsync(pipe, responsePayload, timeout.Token).ConfigureAwait(false);
+        await ReadExactlyAsync(stream, responsePayload, timeout.Token).ConfigureAwait(false);
         var response = JsonDocument.Parse(responsePayload);
         if (!response.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
         {
@@ -130,14 +126,49 @@ public sealed class RemoteNotificationsServiceClient : IRemoteNotificationsServi
         return response;
     }
 
-    private static string ResolvePipeName(ServiceUnitSnapshot unit)
+    private static async Task<Stream> ConnectAsync(
+        ServiceUnitSnapshot unit,
+        CancellationToken cancellationToken)
     {
         var readiness = unit.Readiness;
         var address = readiness?.Address;
-        return string.Equals(readiness?.Kind, "pipe", StringComparison.OrdinalIgnoreCase) &&
-               !string.IsNullOrWhiteSpace(address)
+        if (string.Equals(readiness?.Kind, "unix-socket", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(address))
+        {
+            var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            try
+            {
+                await socket.ConnectAsync(
+                    new UnixDomainSocketEndPoint(address),
+                    cancellationToken).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+
+        var pipeName = string.Equals(readiness?.Kind, "pipe", StringComparison.OrdinalIgnoreCase) &&
+                       !string.IsNullOrWhiteSpace(address)
             ? address
             : PipeName;
+        var pipe = new NamedPipeClientStream(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous);
+        try
+        {
+            await pipe.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            return pipe;
+        }
+        catch
+        {
+            await pipe.DisposeAsync();
+            throw;
+        }
     }
 
     private static RemoteNotificationsServiceState ParseState(JsonElement data)
