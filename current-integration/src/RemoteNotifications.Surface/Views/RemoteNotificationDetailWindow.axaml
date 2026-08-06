@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:av="using:Avalonia.Controls"
         xmlns:controls="using:MyPowerTools.UI.Controls"
         xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
         x:Class="RemoteNotifications.Surface.Views.RemoteNotificationDetailWindow"
@@ -49,12 +50,33 @@
             BorderBrush="{DynamicResource MptBrushBorder}"
             BorderThickness="1"
             CornerRadius="{DynamicResource MptRadiusControl}">
-      <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                    VerticalScrollBarVisibility="Auto"
-                    Padding="{DynamicResource MptUniformS}">
-        <controls:MptMarkdownView Markdown="{Binding Message}"
-                               HorizontalAlignment="Stretch" />
-      </ScrollViewer>
+      <Grid>
+        <av:NativeWebView x:Name="MarkdownWebView"
+                          Focusable="True"
+                          TabIndex="0"
+                          AutomationProperties.Name="Notification message markdown"
+                          ClipToBounds="True"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          NavigationStarted="OnWebViewNavigationStarted"
+                          NewWindowRequested="OnWebViewNewWindowRequested"
+                          AdapterCreated="OnWebViewAdapterCreated"
+                          AdapterDestroyed="OnWebViewAdapterDestroyed" />
+        <ScrollViewer x:Name="FallbackViewer"
+                      IsVisible="False"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      Padding="{DynamicResource MptUniformS}">
+          <StackPanel Spacing="{DynamicResource MptSpacingS}">
+            <TextBlock x:Name="FallbackStatus"
+                       Classes="MptMeta"
+                       TextWrapping="Wrap"
+                       IsVisible="False" />
+            <SelectableTextBlock Text="{Binding Message}"
+                                 TextWrapping="Wrap" />
+          </StackPanel>
+        </ScrollViewer>
+      </Grid>
     </Border>
 
     <StackPanel Grid.Row="2"

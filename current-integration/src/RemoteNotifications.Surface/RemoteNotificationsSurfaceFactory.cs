@@ -40,7 +40,10 @@ public sealed class RemoteNotificationsSurfaceFactory : IMptAvaloniaSurfaceFacto
             serviceClient: serviceClient);
         Info(context, $"Remote Notifications loaded: {viewModel.MessageCountText}.");
 
-        return new RemoteNotificationsView { DataContext = viewModel };
+        return new RemoteNotificationsView
+        {
+            DataContext = viewModel
+        };
     }
 
     private static void Info(MptAvaloniaSurfaceContext context, string message)
