@@ -62,7 +62,7 @@ $runtimeArguments = @(
     'publish', $runtimeProject,
     '-c', $Configuration,
     '-r', $RuntimeIdentifier,
-    '--self-contained', 'true',
+    '--self-contained', 'false',
     '--output', $runtimeRoot,
     "/p:MyPowerToolsRepoRoot=$MyPowerToolsRepoRoot",
     '/p:DebugType=None',
@@ -70,7 +70,7 @@ $runtimeArguments = @(
 )
 & dotnet @runtimeArguments
 if ($LASTEXITCODE -ne 0) {
-    throw "Self-contained runtime publish for $RuntimeIdentifier failed with exit code $LASTEXITCODE"
+    throw "Framework-dependent runtime publish for $RuntimeIdentifier failed with exit code $LASTEXITCODE"
 }
 
 Write-Host $OutputRoot
