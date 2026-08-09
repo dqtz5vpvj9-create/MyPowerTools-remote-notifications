@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "id": "example-message-id",
+  "client_msg_id": "example-client-message-id",
+  "message": "[Remote Notifications] Task completed",
+  "channel": "default",
+  "icon": "codex",
+  "timestamp": "2026-08-09T00:00:00+00:00",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "session_name": "Remote Notifications end-to-end",
+  "source_client": "codex"
+}

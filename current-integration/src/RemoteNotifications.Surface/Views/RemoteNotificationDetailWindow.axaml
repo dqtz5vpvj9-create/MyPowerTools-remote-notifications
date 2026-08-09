@@ -43,6 +43,17 @@
                    FontSize="{DynamicResource MptFontSizeMeta}"
                    FontWeight="Bold" />
       </Border>
+      <Border Background="{DynamicResource MptBrushSurfaceMuted}"
+              CornerRadius="{DynamicResource MptRadiusControl}"
+              Padding="{DynamicResource MptCompactBadgePadding}"
+              IsVisible="{Binding HasSession}"
+              ToolTip.Tip="{Binding SessionId}"
+              VerticalAlignment="Center">
+        <TextBlock Text="{Binding SessionDisplay}"
+                   Foreground="{DynamicResource MptBrushAccent}"
+                   FontSize="{DynamicResource MptFontSizeMeta}"
+                   FontWeight="Bold" />
+      </Border>
     </StackPanel>
 
     <Border Grid.Row="1"
@@ -86,6 +97,9 @@
       <controls:MptButton Classes="MptPrimaryButton"
                           Content="Copy message"
                           Click="OnCopyClick" />
+      <controls:MptButton Content="Copy Session ID"
+                          IsVisible="{Binding HasSession}"
+                          Click="OnCopySessionClick" />
       <controls:MptButton Content="Close"
                           Click="OnCloseClick" />
     </StackPanel>

@@ -250,6 +250,27 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             });
     }
 
+    private void OnCopySessionClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not RemoteNotificationMessageViewModel message ||
+            !message.HasSession ||
+            Clipboard is null)
+        {
+            return;
+        }
+
+        MptCommandFaultBoundary.Run(
+            this,
+            "Copy remote notification Session ID",
+            async () =>
+            {
+                var transfer = new DataTransfer();
+                transfer.Add(DataTransferItem.CreateText(message.SessionId));
+                await Clipboard.SetDataAsync(transfer);
+                await Clipboard.FlushAsync();
+            });
+    }
+
     private void OnCloseClick(object? sender, RoutedEventArgs e)
     {
         Close();

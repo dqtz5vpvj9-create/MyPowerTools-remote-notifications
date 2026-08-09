@@ -180,7 +180,9 @@ if fcm_paused:
 
 
 def send_unifiedpush(channel: str, message: str, icon: str = "info",
-                     timestamp: str = "", notif_id: str = "") -> None:
+                     timestamp: str = "", notif_id: str = "",
+                     session_id: str = "", session_name: str = "",
+                     source_client: str = "") -> None:
     """POST notification to every registered UnifiedPush endpoint URL for a channel.
 
     UnifiedPush endpoints are opaque URLs supplied by the phone-side distributor
@@ -197,6 +199,10 @@ def send_unifiedpush(channel: str, message: str, icon: str = "info",
         "message": message,
         "icon": icon,
         "timestamp": timestamp,
+        "schema_version": 2,
+        "session_id": session_id,
+        "session_name": session_name,
+        "source_client": source_client,
     }
     body = json.dumps(payload)
     headers = {"Content-Type": "application/json"}
@@ -219,7 +225,8 @@ def send_unifiedpush(channel: str, message: str, icon: str = "info",
             logger.warning(f"UP send failed for {url[:48]}...: {e}")
 
 
-def send_fcm_push(channel: str, message: str, icon: str = "info", timestamp: str = "", notif_id: str = "") -> None:
+def send_fcm_push(channel: str, message: str, icon: str = "info", timestamp: str = "", notif_id: str = "",
+                  session_id: str = "", session_name: str = "", source_client: str = "") -> None:
     """Send FCM data messages via HTTP v1 API to all registered tokens for a channel."""
     if not fcm_enabled:
         return
@@ -248,6 +255,10 @@ def send_fcm_push(channel: str, message: str, icon: str = "info", timestamp: str
                     "icon": icon,
                     "timestamp": timestamp,
                     "id": notif_id,
+                    "schema_version": "2",
+                    "session_id": session_id,
+                    "session_name": session_name,
+                    "source_client": source_client,
                 },
             }
         }
@@ -288,8 +299,56 @@ def _dedupe_key(channel: str, client_msg_id: str) -> str:
     return f"notification_dedupe:{cloud_server_port}:{channel}:{client_msg_id}"
 
 
+def _notification_record(raw: Any, channel: str) -> dict[str, Any]:
+    """Normalize legacy tuple records and v2 object records."""
+    if isinstance(raw, dict):
+        return {
+            "schema_version": int(raw.get("schema_version") or 2),
+            "id": str(raw.get("id") or raw.get("message_id") or ""),
+            "client_msg_id": str(raw.get("client_msg_id") or ""),
+            "channel": str(raw.get("channel") or channel),
+            "message": str(raw.get("message") or ""),
+            "icon": str(raw.get("icon") or "info"),
+            "timestamp": str(raw.get("timestamp") or ""),
+            "server_timestamp": str(raw.get("server_timestamp") or raw.get("timestamp") or ""),
+            "sent_clients": list(raw.get("sent_clients") or raw.get("sent_list") or []),
+            "session_id": str(raw.get("session_id") or ""),
+            "session_name": str(raw.get("session_name") or ""),
+            "source_client": str(raw.get("source_client") or ""),
+        }
+    if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+        raise ValueError("Unsupported notification record")
+    timestamp = str(raw[0])
+    return {
+        "schema_version": 1,
+        "id": str(raw[4]) if len(raw) > 4 and raw[4] else "",
+        "client_msg_id": "",
+        "channel": channel,
+        "message": str(raw[1]),
+        "icon": str(raw[3]) if len(raw) > 3 and raw[3] else "info",
+        "timestamp": timestamp,
+        "server_timestamp": str(raw[5]) if len(raw) > 5 and raw[5] else timestamp,
+        "sent_clients": list(raw[2]) if len(raw) > 2 and isinstance(raw[2], list) else [],
+        "session_id": "",
+        "session_name": "",
+        "source_client": "",
+    }
+
+
+def _public_notification(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: record.get(key, "")
+        for key in (
+            "schema_version", "id", "client_msg_id", "channel", "message", "icon",
+            "timestamp", "server_timestamp", "session_id", "session_name", "source_client",
+        )
+    }
+
+
 def add_notification(message: str, channel: str, icon: str = "info",
-                     notif_id: str = "", timestamp: str = "", client_msg_id: str = "") -> dict[str, Any]:
+                     notif_id: str = "", timestamp: str = "", client_msg_id: str = "",
+                     session_id: str = "", session_name: str = "",
+                     source_client: str = "", schema_version: int = 2) -> dict[str, Any]:
     import uuid
     event_timestamp = normalize_notification_timestamp(timestamp)
     server_timestamp = datetime_class.now(timezone.utc).isoformat()
@@ -304,6 +363,7 @@ def add_notification(message: str, channel: str, icon: str = "info",
             "timestamp": event_timestamp,
             "server_timestamp": server_timestamp,
             "client_msg_id": client_msg_id,
+            "session_id": session_id,
         }
         inserted = redis_conn.set(key, json.dumps(dedupe_record), nx=True, ex=86400)
         if not inserted:
@@ -325,22 +385,33 @@ def add_notification(message: str, channel: str, icon: str = "info",
                 "message_id": existing_id,
                 "client_msg_id": client_msg_id,
             }
-    # 6-tuple: event timestamp for display/dedup, server timestamp for pull
-    # cursors. Legacy 4/5-tuples remain readable.
-    notification = (event_timestamp, message, [], icon, notif_id, server_timestamp)
+    notification = {
+        "schema_version": max(2, int(schema_version or 2)),
+        "id": notif_id,
+        "client_msg_id": client_msg_id,
+        "channel": channel,
+        "message": message,
+        "icon": icon,
+        "timestamp": event_timestamp,
+        "server_timestamp": server_timestamp,
+        "sent_clients": [],
+        "session_id": session_id,
+        "session_name": session_name,
+        "source_client": source_client,
+    }
     redis_conn.lpush(f"{redis_notifications}:{channel}", json.dumps(notification))
     logger.debug(f"Added notification id={notif_id[:8]} to channel: {channel}")
     # Fire-and-forget UnifiedPush forward in a background thread
     threading.Thread(
         target=send_unifiedpush,
-        args=(channel, message, icon, event_timestamp, notif_id),
+        args=(channel, message, icon, event_timestamp, notif_id, session_id, session_name, source_client),
         daemon=True,
     ).start()
     # FCM is paused — keep code path for rollback via ENABLE_FCM=1.
     if fcm_enabled and not fcm_paused:
         threading.Thread(
             target=send_fcm_push,
-            args=(channel, message, icon, event_timestamp, notif_id),
+            args=(channel, message, icon, event_timestamp, notif_id, session_id, session_name, source_client),
             daemon=True,
         ).start()
     return {
@@ -351,28 +422,24 @@ def add_notification(message: str, channel: str, icon: str = "info",
     }
 
 
-def get_notification(channel: str, client_id: int) -> Tuple[datetime_class, str, List[int], str, str] | None:
+def get_notification(channel: str, client_id: int) -> dict[str, Any] | None:
     notification_key = f"{redis_notifications}:{channel}"
     lock_key = f"lock:{notification_key}"
     with redis_conn.lock(lock_key, timeout=5):
         for i in range(redis_conn.llen(notification_key)):
             notification_json = redis_conn.lindex(notification_key, i)
             if notification_json:
-                notification = json.loads(notification_json)
-                msg_date = parse_utc(notification[0])
-                msg = notification[1]
-                sent_list = notification[2]
-                icon = notification[3] if len(notification) > 3 else "info"
-                notif_id = notification[4] if len(notification) > 4 else ""
-                server_ts = notification[5] if len(notification) > 5 else notification[0]
-                server_date = parse_utc(server_ts)
-                logger.debug(f"Checking notification: {msg} {msg_date} {sent_list} since now: {datetime_class.now(timezone.utc) - msg_date} to channel: {channel}")
+                record = _notification_record(json.loads(notification_json), channel)
+                msg_date = parse_utc(record["timestamp"])
+                server_date = parse_utc(record["server_timestamp"])
+                sent_list = record["sent_clients"]
+                logger.debug(f"Checking notification id={record['id'][:12]} sent={sent_list} channel={channel}")
                 if datetime_class.now(timezone.utc) - server_date <= timedelta(seconds=60) and client_id not in sent_list:
                     sent_list.append(client_id)
-                    updated_notification = (msg_date.isoformat(), msg, sent_list, icon, notif_id, server_ts)
-                    redis_conn.lset(notification_key, i, json.dumps(updated_notification))
-                    logger.debug(f"Returning notification: {msg} to channel: {channel}")
-                    return msg_date, msg, sent_list, icon, notif_id
+                    record["sent_clients"] = sent_list
+                    redis_conn.lset(notification_key, i, json.dumps(record))
+                    logger.debug(f"Returning notification id={record['id'][:12]} channel={channel}")
+                    return record
     return None
 
 
@@ -472,6 +539,10 @@ def receive_notification() -> Tuple[Response, int]:
             client_id = data.get("id", "")  # optional client-generated UUID
             timestamp = data.get("timestamp", "")
             client_msg_id = data.get("client_msg_id", "")
+            session_id = data.get("session_id", "")
+            session_name = data.get("session_name", "")
+            source_client = data.get("source_client", "")
+            schema_version = data.get("schema_version", 1)
             logger.info(
                 f"Received notification from ip {request.remote_addr} "
                 f"id={client_id[:12] if client_id else 'none'} "
@@ -485,6 +556,10 @@ def receive_notification() -> Tuple[Response, int]:
                 notif_id=client_id,
                 timestamp=timestamp,
                 client_msg_id=client_msg_id,
+                session_id=session_id,
+                session_name=session_name,
+                source_client=source_client,
+                schema_version=schema_version,
             )
         except jsonschema.exceptions.ValidationError as e:
             return jsonify({"error": e.message}), 400
@@ -555,13 +630,9 @@ def pull_notifications() -> Tuple[Response, int]:
         raw = redis_conn.lindex(notification_key, i)
         if not raw:
             continue
-        notification = json.loads(raw)
-        msg_date = parse_utc(notification[0])
-        msg = notification[1]
-        icon = notification[3] if len(notification) > 3 else "info"
-        notif_id = notification[4] if len(notification) > 4 else ""
-        server_ts = notification[5] if len(notification) > 5 else notification[0]
-        server_dt = parse_utc(server_ts)
+        record = _notification_record(json.loads(raw), channel)
+        msg_date = parse_utc(record["timestamp"])
+        server_dt = parse_utc(record["server_timestamp"])
         if since:
             try:
                 since_dt = parse_utc(since)
@@ -569,14 +640,9 @@ def pull_notifications() -> Tuple[Response, int]:
                     continue
             except ValueError:
                 pass
-        results.append({
-            "id": notif_id,
-            "message": msg,
-            "icon": icon,
-            "channel": channel,
-            "timestamp": msg_date.isoformat(),
-            "server_timestamp": server_dt.isoformat(),
-        })
+        record["timestamp"] = msg_date.isoformat()
+        record["server_timestamp"] = server_dt.isoformat()
+        results.append(_public_notification(record))
     return jsonify({"notifications": results}), 200
 
 
@@ -606,16 +672,9 @@ def get_notifications() -> Tuple[Response, int]:
         logger.debug(f"Check for the {attempt + 1} time(s) for notification in channel {channel} for client {client_id} from ip {request.remote_addr}")
         notification = get_notification(channel, client_id)
         if notification:
-            msg_date, msg, _, icon, notif_id = notification
-            ret = {
-                "id": notif_id,
-                "message": msg,
-                "icon": icon,
-                "channel": channel,
-                "timestamp": msg_date.isoformat(),
-            }
+            ret = _public_notification(notification)
             jsonschema.validate(ret, result_schema)
-            logger.debug(f"Return {msg} in channel {channel} for client {client_id} from ip {request.remote_addr}")
+            logger.debug(f"Return id={ret['id'][:12]} in channel {channel} for client {client_id} from ip {request.remote_addr}")
             return jsonify(ret), 200
         time.sleep(1)
     logger.debug(f"Dropped connection in channel {channel} for client {client_id} from ip {request.remote_addr}")

@@ -11,6 +11,27 @@ public sealed class RemoteNotificationsProductTests
     private static readonly string Root = FindRepositoryRoot();
 
     [Fact]
+    public void Session_metadata_is_visible_and_searchable()
+    {
+        var message = new RemoteNotificationMessageViewModel(new RemoteNotificationRecord(
+            "session-message",
+            "default",
+            "Task complete",
+            "codex",
+            DateTimeOffset.UtcNow.ToString("O"),
+            "",
+            "00000000-0000-0000-0000-000000000001",
+            "Session metadata rollout",
+            "codex"));
+
+        Assert.True(message.HasSession);
+        Assert.Equal("00000000…", message.SessionShortId);
+        Assert.Contains("Session metadata rollout", message.SessionDisplay, StringComparison.Ordinal);
+        Assert.True(message.MatchesSearch("00000000-0000"));
+        Assert.True(message.MatchesSearch("metadata rollout"));
+    }
+
+    [Fact]
     public void Detail_window_title_hides_the_internal_default_channel()
     {
         var defaultMessage = new RemoteNotificationMessageViewModel(

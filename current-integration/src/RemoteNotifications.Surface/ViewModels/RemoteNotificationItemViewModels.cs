@@ -60,10 +60,22 @@ public sealed class RemoteNotificationMessageViewModel : MyPowerTools.AvaloniaSd
     public string DisplayMessage => RemoveLeadingLabel(Source.Message, Label);
     public string Icon => string.IsNullOrWhiteSpace(Source.Icon) ? "info" : Source.Icon.ToLowerInvariant();
     public string Timestamp => Source.Timestamp;
+    public string SessionId => Source.SessionId;
+    public string SessionName => Source.SessionName;
+    public string SourceClient => Source.SourceClient;
+    public bool HasSession => !string.IsNullOrWhiteSpace(SessionId);
+    public string SessionShortId => HasSession
+        ? SessionId.Length <= 8 ? SessionId : $"{SessionId[..8]}…"
+        : "";
+    public string SessionDisplay => string.IsNullOrWhiteSpace(SessionName)
+        ? $"Session {SessionShortId}"
+        : $"{SessionName} · {SessionShortId}";
     public string Label => RemoteNotificationsLegacyStore.ExtractLabel(Message);
     public bool HasCustomChannel => !string.Equals(Channel, "default", StringComparison.OrdinalIgnoreCase);
     public string DetailWindowTitle => HasCustomChannel ? $"{Channel} notification" : "Remote notification";
-    public string AccessibleLabel => $"{RelativeTime}, {Channel}, {Message}";
+    public string AccessibleLabel => HasSession
+        ? $"{RelativeTime}, {Channel}, session {SessionId}, {Message}"
+        : $"{RelativeTime}, {Channel}, {Message}";
 
     public string IconBackground => Icon switch
     {
@@ -106,7 +118,10 @@ public sealed class RemoteNotificationMessageViewModel : MyPowerTools.AvaloniaSd
 
     public bool MatchesSearch(string query)
     {
-        return query.Length == 0 || Message.Contains(query, StringComparison.OrdinalIgnoreCase);
+        return query.Length == 0 ||
+               Message.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               SessionId.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+               SessionName.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     public static (string Display, string Tooltip) FormatRelativeTimestamp(string timestamp)

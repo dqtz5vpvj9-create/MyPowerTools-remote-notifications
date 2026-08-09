@@ -209,6 +209,9 @@ def send_fcm_push(
     icon: str = "info",
     timestamp: str = "",
     notif_id: str = "",
+    session_id: str = "",
+    session_name: str = "",
+    source_client: str = "",
 ) -> dict[str, Any]:
     """Send FCM data message to all registered tokens for a channel."""
     if not timestamp:
@@ -263,6 +266,10 @@ def send_fcm_push(
                     "icon": icon,
                     "timestamp": timestamp,
                     "id": notif_id,
+                    "schema_version": "2",
+                    "session_id": session_id,
+                    "session_name": session_name,
+                    "source_client": source_client,
                 },
             }
         }

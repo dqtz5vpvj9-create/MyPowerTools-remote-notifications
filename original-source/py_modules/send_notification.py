@@ -235,6 +235,9 @@ def main():
         parser.error('message is required unless --stdin is used')
         return
 
+    session_id = str(data.get("session_id") or "") if args.stdin else ""
+    session_name = get_session_name(session_id, args.client) if session_id else ""
+
     # Debug: log what we're sending
     debug_log = f"/tmp/{args.client}_hook_debug.log"
     with open(debug_log, 'w') as f:
@@ -260,8 +263,19 @@ def main():
     logger = setup_logging()
     sender = SimpleHttpNotificationSender(cloud_server_protocol, cloud_server_ip, cloud_server_port, logger)
     http_timeout = float(os.environ.get("ANDROIDTOOLS_NOTIFY_HTTP_TIMEOUT", "10"))
-    sender.send(args.channel, message, args.icon, notif_id=notif_id,
-                client_msg_id=client_msg_id, timestamp=timestamp, timeout=http_timeout)
+    sender.send(
+        args.channel,
+        message,
+        args.icon,
+        notif_id=notif_id,
+        client_msg_id=client_msg_id,
+        timestamp=timestamp,
+        session_id=session_id,
+        session_name=session_name,
+        source_client=args.client,
+        schema_version=2,
+        timeout=http_timeout,
+    )
     with open(debug_log, 'a') as f:
         f.write(f"client_msg_id={client_msg_id}\n")
         f.write(f"notif_id={notif_id}\n")
@@ -269,8 +283,16 @@ def main():
     # Also send FCM push directly from this machine (server may not have Google connectivity)
     try:
         from py_modules.fcm_push import send_fcm_push
-        fcm_result = send_fcm_push(args.channel, message, args.icon,
-                                   timestamp=timestamp, notif_id=notif_id)
+        fcm_result = send_fcm_push(
+            args.channel,
+            message,
+            args.icon,
+            timestamp=timestamp,
+            notif_id=notif_id,
+            session_id=session_id,
+            session_name=session_name,
+            source_client=args.client,
+        )
         with open(debug_log, 'a') as f:
             f.write(f"fcm_result={json.dumps(fcm_result, sort_keys=True)}\n")
     except Exception as e:

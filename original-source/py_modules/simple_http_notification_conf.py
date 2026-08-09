@@ -45,7 +45,11 @@ add_schema = {
         "icon": {"type": "string"},
         "id": {"type": "string"},
         "client_msg_id": {"type": "string"},
-        "timestamp": {"type": "string"}
+        "timestamp": {"type": "string"},
+        "schema_version": {"type": "integer", "minimum": 1},
+        "session_id": {"type": "string", "maxLength": 128},
+        "session_name": {"type": "string", "maxLength": 512},
+        "source_client": {"type": "string", "maxLength": 64}
     }
 }
 
@@ -58,7 +62,11 @@ result_schema = {
         "id": {"type": "string"},
         "channel": {"type": "string"},
         "timestamp": {"type": "string"},
-        "server_timestamp": {"type": "string"}
+        "server_timestamp": {"type": "string"},
+        "schema_version": {"type": "integer"},
+        "session_id": {"type": "string"},
+        "session_name": {"type": "string"},
+        "source_client": {"type": "string"}
     }
 }
 

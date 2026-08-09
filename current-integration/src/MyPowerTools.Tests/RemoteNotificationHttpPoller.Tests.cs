@@ -43,7 +43,10 @@ public sealed class RemoteNotificationHttpPollerTests
                       "message": "[build] complete",
                       "icon": "success",
                       "timestamp": "2026-07-11T00:00:00Z",
-                      "server_timestamp": "2026-07-11T00:00:01Z"
+                      "server_timestamp": "2026-07-11T00:00:01Z",
+                      "session_id": "00000000-0000-0000-0000-000000000001",
+                      "session_name": "Build session",
+                      "source_client": "codex"
                     }
                   ]
                 }
@@ -64,6 +67,9 @@ public sealed class RemoteNotificationHttpPollerTests
         Assert.Equal("message-1", notification.Id);
         Assert.Equal("[build] complete", notification.Message);
         Assert.Equal("2026-07-11T00:00:01Z", notification.ServerTimestamp);
+        Assert.Equal("00000000-0000-0000-0000-000000000001", notification.SessionId);
+        Assert.Equal("Build session", notification.SessionName);
+        Assert.Equal("codex", notification.SourceClient);
 
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Get, request.Method);

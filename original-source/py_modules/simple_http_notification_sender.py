@@ -95,6 +95,10 @@ class SimpleHttpNotificationSender:
         notif_id: str = "",
         client_msg_id: str = "",
         timestamp: str = "",
+        session_id: str = "",
+        session_name: str = "",
+        source_client: str = "",
+        schema_version: int = 2,
         timeout: float | None = None,
     ):
         data = {"message": message, "channel": channel, "icon": icon}
@@ -104,6 +108,13 @@ class SimpleHttpNotificationSender:
             data["client_msg_id"] = client_msg_id
         if timestamp:
             data["timestamp"] = timestamp
+        if session_id:
+            data["session_id"] = session_id
+        if session_name:
+            data["session_name"] = session_name
+        if source_client:
+            data["source_client"] = source_client
+        data["schema_version"] = schema_version
         response = _http_post_json(
             f'{self.cloud_server_protocol}://{self.cloud_server_ip}:{self.cloud_server_port}/notification',
             data,
@@ -168,6 +179,8 @@ class MockSimpleHttpNotificationSender:
     def send(self, channel: str, message: str, icon: str = "info",
              notif_id: str = "", timestamp: str = "",
              client_msg_id: str = "",
+             session_id: str = "", session_name: str = "",
+             source_client: str = "", schema_version: int = 2,
              timeout: float | None = None) -> None:
         self.logger.notice(message)
 

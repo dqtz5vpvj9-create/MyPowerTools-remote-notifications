@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mypowertools.local/contracts/remote-notification-v2.schema.json",
+  "title": "Remote Notification v2",
+  "type": "object",
+  "required": ["schema_version", "message", "channel"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": { "type": "string" },
+    "client_msg_id": { "type": "string" },
+    "message": { "type": "string" },
+    "channel": { "type": "string" },
+    "icon": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "server_timestamp": { "type": "string" },
+    "session_id": { "type": "string", "maxLength": 128 },
+    "session_name": { "type": "string", "maxLength": 512 },
+    "source_client": { "type": "string", "maxLength": 64 }
+  },
+  "additionalProperties": true
+}

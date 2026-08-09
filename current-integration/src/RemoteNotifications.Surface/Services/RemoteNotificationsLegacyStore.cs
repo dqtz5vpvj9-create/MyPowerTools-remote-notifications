@@ -18,7 +18,10 @@ sealed record RemoteNotificationRecord(
     string Message,
     string Icon,
     string Timestamp,
-    string ServerTimestamp = "");
+    string ServerTimestamp = "",
+    string SessionId = "",
+    string SessionName = "",
+    string SourceClient = "");
 
 #if ANDROID_TOOLS_ADAPTER
 internal
@@ -260,7 +263,10 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             Message = message.Message,
             Icon = message.Icon,
             Timestamp = message.Timestamp,
-            ServerTimestamp = message.ServerTimestamp
+            ServerTimestamp = message.ServerTimestamp,
+            SessionId = message.SessionId,
+            SessionName = message.SessionName,
+            SourceClient = message.SourceClient
         }).ToArray();
 
         using var key = Registry.CurrentUser.CreateSubKey(RegistryPath, writable: true);
@@ -542,7 +548,10 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                     message.Message ?? "",
                     string.IsNullOrWhiteSpace(message.Icon) ? "info" : message.Icon,
                     message.Timestamp ?? "",
-                    message.ServerTimestamp ?? ""))
+                    message.ServerTimestamp ?? "",
+                    message.SessionId ?? "",
+                    message.SessionName ?? "",
+                    message.SourceClient ?? ""))
                 .TakeLast(MaximumMessages)
                 .ToArray();
         }
@@ -623,6 +632,15 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
         [JsonPropertyName("server_timestamp")]
         public string? ServerTimestamp { get; init; }
+
+        [JsonPropertyName("session_id")]
+        public string? SessionId { get; init; }
+
+        [JsonPropertyName("session_name")]
+        public string? SessionName { get; init; }
+
+        [JsonPropertyName("source_client")]
+        public string? SourceClient { get; init; }
     }
 
     private sealed class PersistedState

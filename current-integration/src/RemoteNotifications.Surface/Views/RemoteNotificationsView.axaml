@@ -434,6 +434,14 @@
                         <TextBlock Text="{Binding Channel}"
                                    Classes="MptMeta" />
                       </Border>
+                      <Border Padding="{DynamicResource MptCompactBadgePadding}"
+                              CornerRadius="{DynamicResource MptRadiusControl}"
+                              Background="{DynamicResource MptBrushSurfaceMuted}"
+                              IsVisible="{Binding HasSession}"
+                              ToolTip.Tip="{Binding SessionId}">
+                        <TextBlock Text="{Binding SessionDisplay}"
+                                   Classes="MptMeta" />
+                      </Border>
                     </StackPanel>
                     <TextBlock Grid.Column="1"
                                Text="{Binding RelativeTime}"
