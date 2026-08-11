@@ -55,6 +55,19 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         </head>
         <body>
         {{CONTENT}}
+        <script>
+          document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+              if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage("close");
+              }
+              if (window.webkit && window.webkit.messageHandlers &&
+                  window.webkit.messageHandlers.close) {
+                window.webkit.messageHandlers.close.postMessage("close");
+              }
+            }
+          });
+        </script>
         </body>
         </html>
         """;
@@ -75,6 +88,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             ?? throw new InvalidOperationException("Markdown fallback viewer was not found.");
         _fallbackStatus = this.FindControl<TextBlock>("FallbackStatus")
             ?? throw new InvalidOperationException("Markdown fallback status was not found.");
+        _markdownWebView.WebMessageReceived += OnWebMessageReceived;
     }
 
     public RemoteNotificationDetailWindow(RemoteNotificationMessageViewModel message)
@@ -161,6 +175,22 @@ public sealed partial class RemoteNotificationDetailWindow : Window
     {
         _webViewReady = false;
         ShowFallback("The web-based markdown viewer was disconnected. Showing plain text instead.");
+    }
+
+    private void OnWebMessageReceived(object? sender, WebMessageReceivedEventArgs e)
+    {
+        if (string.Equals(e.Body?.Trim(), "close", StringComparison.OrdinalIgnoreCase))
+        {
+            Close();
+        }
+    }
+
+    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            Close();
+        }
     }
 
     private void ShowWebView()

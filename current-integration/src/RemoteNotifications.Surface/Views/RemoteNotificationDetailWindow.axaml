@@ -10,6 +10,7 @@
         MinWidth="620"
         MinHeight="460"
         Background="{DynamicResource MptBrushAppBackground}"
+        KeyDown="OnWindowKeyDown"
         WindowStartupLocation="CenterScreen">
   <Grid RowDefinitions="Auto,*,Auto"
         Margin="{DynamicResource MptCompactPadding}"
