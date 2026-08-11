@@ -58,11 +58,12 @@ $runtimePath = switch ($RuntimeIdentifier) {
     'linux-x64' { @('linux', 'x64') }
 }
 $runtimeRoot = Join-Path (Join-Path $OutputRoot $runtimePath[0]) $runtimePath[1]
+$selfContained = if ($RuntimeIdentifier -like 'win-*') { 'false' } else { 'true' }
 $runtimeArguments = @(
     'publish', $runtimeProject,
     '-c', $Configuration,
     '-r', $RuntimeIdentifier,
-    '--self-contained', 'false',
+    '--self-contained', $selfContained,
     '--output', $runtimeRoot,
     "/p:MyPowerToolsRepoRoot=$MyPowerToolsRepoRoot",
     '/p:DebugType=None',
