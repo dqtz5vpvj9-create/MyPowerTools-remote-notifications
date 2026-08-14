@@ -50,7 +50,10 @@ public sealed class RemoteNotificationDetailWindowService : IDisposable
             return true;
         }
 
-        var detail = new RemoteNotificationDetailWindow(message);
+        var detail = new RemoteNotificationDetailWindow(message)
+        {
+            SessionStore = _store
+        };
         detail.Closed += OnClosed;
         _windows[key] = detail;
         Present(detail);

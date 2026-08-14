@@ -44,12 +44,65 @@ public sealed class RemoteNotificationLabelChipViewModel : MyPowerTools.Avalonia
 public sealed class RemoteNotificationMessageViewModel : MyPowerTools.AvaloniaSdk.MptObservableViewModel
 {
     private string _relativeTime;
+    private bool _hasSessionPosition;
+    private string _sessionPositionText = "";
+    private string _sessionPositionTooltip = "";
+    private bool _canNavigatePrevious;
+    private bool _canNavigateNext;
 
     public RemoteNotificationMessageViewModel(RemoteNotificationRecord source)
     {
         Source = source;
         _relativeTime = FormatRelativeTimestamp(source.Timestamp).Display;
         AbsoluteTime = FormatRelativeTimestamp(source.Timestamp).Tooltip;
+    }
+
+    /// <summary>
+    /// Position of this message inside its session chain, resolved by the
+    /// detail window. The window shows "N / M" and enables ← / → browsing
+    /// when the chain holds more than one message.
+    /// </summary>
+    public void UpdateSessionPosition(RemoteNotificationSessionPosition? position)
+    {
+        HasSessionPosition = position is { Count: > 1 };
+        SessionPositionText = position is { } withPosition
+            ? $"{withPosition.Index + 1} / {withPosition.Count}"
+            : "";
+        SessionPositionTooltip = position is { } tooltipPosition
+            ? $"Message {tooltipPosition.Index + 1} of {tooltipPosition.Count} in this session — use ← / → to browse"
+            : "";
+        CanNavigatePrevious = position is { } previousPosition && previousPosition.Index > 0;
+        CanNavigateNext = position is { } nextPosition && nextPosition.Index < nextPosition.Count - 1;
+    }
+
+    public bool HasSessionPosition
+    {
+        get => _hasSessionPosition;
+        private set => SetProperty(ref _hasSessionPosition, value);
+    }
+
+    public string SessionPositionText
+    {
+        get => _sessionPositionText;
+        private set => SetProperty(ref _sessionPositionText, value);
+    }
+
+    public string SessionPositionTooltip
+    {
+        get => _sessionPositionTooltip;
+        private set => SetProperty(ref _sessionPositionTooltip, value);
+    }
+
+    public bool CanNavigatePrevious
+    {
+        get => _canNavigatePrevious;
+        private set => SetProperty(ref _canNavigatePrevious, value);
+    }
+
+    public bool CanNavigateNext
+    {
+        get => _canNavigateNext;
+        private set => SetProperty(ref _canNavigateNext, value);
     }
 
     public RemoteNotificationRecord Source { get; }

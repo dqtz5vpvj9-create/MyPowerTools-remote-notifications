@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -8,6 +9,7 @@ using Avalonia.Platform;
 using Avalonia.Styling;
 using Markdig;
 using MyPowerTools.AvaloniaSdk;
+using RemoteNotifications.Surface.Services;
 using RemoteNotifications.Surface.ViewModels;
 
 namespace RemoteNotifications.Surface.Views;
@@ -56,15 +58,37 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         <body>
         {{CONTENT}}
         <script>
+          function post(message) {
+            if (window.chrome && window.chrome.webview) {
+              window.chrome.webview.postMessage(message);
+            }
+            if (window.webkit && window.webkit.messageHandlers &&
+                window.webkit.messageHandlers.close) {
+              window.webkit.messageHandlers.close.postMessage(message);
+            }
+          }
+          function isEditable(node) {
+            while (node) {
+              if (node.isContentEditable) { return true; }
+              var tag = node.tagName;
+              if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") { return true; }
+              node = node.parentElement;
+            }
+            return false;
+          }
           document.addEventListener("keydown", function (event) {
             if (event.key === "Escape") {
-              if (window.chrome && window.chrome.webview) {
-                window.chrome.webview.postMessage("close");
-              }
-              if (window.webkit && window.webkit.messageHandlers &&
-                  window.webkit.messageHandlers.close) {
-                window.webkit.messageHandlers.close.postMessage("close");
-              }
+              post("close");
+              return;
+            }
+            if (isEditable(event.target)) { return; }
+            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) { return; }
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              post("previous");
+            } else if (event.key === "ArrowRight") {
+              event.preventDefault();
+              post("next");
             }
           });
         </script>
@@ -75,6 +99,8 @@ public sealed partial class RemoteNotificationDetailWindow : Window
     private readonly NativeWebView _markdownWebView;
     private readonly ScrollViewer _fallbackViewer;
     private readonly TextBlock _fallbackStatus;
+    private IRemoteNotificationsStore _sessionStore = new RemoteNotificationsLegacyStore();
+    private RemoteNotificationSessionPosition? _sessionPosition;
     private bool _webViewReady;
     private bool _themeChangedBeforeReady;
 
@@ -91,13 +117,15 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         _markdownWebView.WebMessageReceived += OnWebMessageReceived;
     }
 
-    public RemoteNotificationDetailWindow(RemoteNotificationMessageViewModel message)
+    public RemoteNotificationDetailWindow(
+        RemoteNotificationMessageViewModel message,
+        IRemoteNotificationsStore? sessionStore = null)
         : this()
     {
-        DataContext = message;
-        Title = message.DetailWindowTitle;
+        _sessionStore = sessionStore ?? new RemoteNotificationsLegacyStore();
         ActualThemeVariantChanged += OnActualThemeVariantChanged;
         Closed += OnClosed;
+        SetMessage(message);
         if (IsWebViewAvailable())
         {
             RenderMarkdown();
@@ -105,6 +133,83 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         }
 
         ShowFallback("The web-based markdown viewer is unavailable on this system. Showing plain text instead.");
+    }
+
+    /// <summary>
+    /// Store used to resolve the current message's session chain. The detail
+    /// window service injects its own store so navigation sees the same
+    /// history as the feed.
+    /// </summary>
+    public IRemoteNotificationsStore SessionStore
+    {
+        get => _sessionStore;
+        set
+        {
+            _sessionStore = value ?? throw new ArgumentNullException(nameof(value));
+            RefreshSessionPosition();
+        }
+    }
+
+    public void NavigatePrevious()
+    {
+        Navigate(-1);
+    }
+
+    public void NavigateNext()
+    {
+        Navigate(1);
+    }
+
+    private void Navigate(int delta)
+    {
+        if (_sessionPosition is not { } position ||
+            !RemoteNotificationSessionChain.TryNavigate(position, delta, out var target))
+        {
+            return;
+        }
+
+        SetMessage(new RemoteNotificationMessageViewModel(target));
+    }
+
+    private void SetMessage(RemoteNotificationMessageViewModel message)
+    {
+        DataContext = message;
+        Title = message.DetailWindowTitle;
+        RefreshSessionPosition();
+        if (_webViewReady)
+        {
+            RenderMarkdown();
+        }
+    }
+
+    private void RefreshSessionPosition()
+    {
+        var position = ResolveSessionPosition();
+        _sessionPosition = position;
+        if (DataContext is RemoteNotificationMessageViewModel message)
+        {
+            message.UpdateSessionPosition(position);
+        }
+    }
+
+    private RemoteNotificationSessionPosition? ResolveSessionPosition()
+    {
+        if (DataContext is not RemoteNotificationMessageViewModel message || !message.HasSession)
+        {
+            return null;
+        }
+
+        try
+        {
+            return RemoteNotificationSessionChain.Resolve(
+                SessionStore.Load().MessagesOldestFirst,
+                message.Source);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
+        {
+            // Session position is a convenience; a failing store must not break the window.
+            return null;
+        }
     }
 
     private void RenderMarkdown()
@@ -179,17 +284,35 @@ public sealed partial class RemoteNotificationDetailWindow : Window
 
     private void OnWebMessageReceived(object? sender, WebMessageReceivedEventArgs e)
     {
-        if (string.Equals(e.Body?.Trim(), "close", StringComparison.OrdinalIgnoreCase))
+        switch (e.Body?.Trim().ToLowerInvariant())
         {
-            Close();
+            case "close":
+                Close();
+                break;
+            case "previous":
+                NavigatePrevious();
+                break;
+            case "next":
+                NavigateNext();
+                break;
         }
     }
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        switch (e.Key)
         {
-            Close();
+            case Key.Escape:
+                Close();
+                break;
+            case Key.Left when e.KeyModifiers == KeyModifiers.None && _sessionPosition is not null:
+                NavigatePrevious();
+                e.Handled = true;
+                break;
+            case Key.Right when e.KeyModifiers == KeyModifiers.None && _sessionPosition is not null:
+                NavigateNext();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -259,6 +382,16 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         {
             // Opening the system browser must never break the detail window.
         }
+    }
+
+    private void OnPreviousClick(object? sender, RoutedEventArgs e)
+    {
+        NavigatePrevious();
+    }
+
+    private void OnNextClick(object? sender, RoutedEventArgs e)
+    {
+        NavigateNext();
     }
 
     private void OnCopyClick(object? sender, RoutedEventArgs e)

@@ -40,7 +40,12 @@ public sealed class RemoteNotificationsSurfaceFactory : IMptAvaloniaSurfaceFacto
             serviceClient: serviceClient);
         Info(context, $"Remote Notifications loaded: {viewModel.MessageCountText}.");
 
-        return new RemoteNotificationsView
+        // Detail windows must resolve session chains and activation lookups
+        // from the same store the feed uses; the shared service would fall
+        // back to the legacy registry when the tool data root is not in the
+        // process environment.
+        var detailWindows = new RemoteNotificationDetailWindowService(store);
+        return new RemoteNotificationsView(detailWindows)
         {
             DataContext = viewModel
         };
