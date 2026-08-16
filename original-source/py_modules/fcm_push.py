@@ -203,6 +203,18 @@ def _default_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+FCM_MESSAGE_MAX_BYTES = 3000
+
+
+def _fcm_message(message: str) -> tuple[str, str]:
+    """Fit the data payload under FCM's 4 KiB limit; mark truncation for the app."""
+    raw = str(message).encode("utf-8")
+    if len(raw) <= FCM_MESSAGE_MAX_BYTES:
+        return str(message), "0"
+    preview = raw[:FCM_MESSAGE_MAX_BYTES].decode("utf-8", errors="ignore")
+    return preview + "\n…[内容过长，正在同步完整内容]", "1"
+
+
 def send_fcm_push(
     channel: str,
     message: str,
@@ -255,13 +267,15 @@ def send_fcm_push(
 
     removed = []
     status_codes: dict[str, int] = {}
+    fcm_message, truncated = _fcm_message(message)
     for token in channel_tokens:
         payload = {
             "message": {
                 "token": token,
                 "data": {
                     "title": channel,
-                    "message": message,
+                    "message": fcm_message,
+                    "truncated": truncated,
                     "channel": channel,
                     "icon": icon,
                     "timestamp": timestamp,

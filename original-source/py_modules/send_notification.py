@@ -115,8 +115,6 @@ def _dsh_last_assistant_message(transcript_path: str) -> str:
                     parts.append(str(text))
         if parts:
             last = "\n".join(parts).strip()
-    if len(last) > 2000:
-        last = last[:2000] + "…"
     return last
 
 
