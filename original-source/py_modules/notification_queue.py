@@ -438,7 +438,7 @@ def main() -> int:
     enqueue_parser.add_argument("message", nargs="?", default=None)
     enqueue_parser.add_argument("--channel", default="default")
     enqueue_parser.add_argument("--icon", default="info")
-    enqueue_parser.add_argument("--client", default="claude", choices=["claude", "codex"])
+    enqueue_parser.add_argument("--client", default="claude", choices=["claude", "codex", "dsh"])
     enqueue_parser.add_argument("--stdin", action="store_true")
     enqueue_parser.add_argument("--hook", default=None)
     enqueue_parser.add_argument("--no-start-worker", action="store_true")

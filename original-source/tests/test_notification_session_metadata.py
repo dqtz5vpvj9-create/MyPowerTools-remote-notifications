@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_send_module():
+    path = ROOT / "py_modules" / "send_notification.py"
+    spec = importlib.util.spec_from_file_location("dsh_send_notification", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.path.insert(0, str(ROOT))
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_sender_module():
@@ -56,3 +69,50 @@ def test_server_source_keeps_legacy_records_readable():
     assert "isinstance(raw, (list, tuple))" in source
     assert '"session_id": ""' in source
     assert "results.append(_public_notification(record))" in source
+
+
+def test_dsh_session_name_from_projection_cache(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    storage = dsh_home / "storages"
+    storage.mkdir(parents=True)
+    (storage / "session_projcache.json").write_text(json.dumps({
+        "tables": {
+            "sessions": {
+                "session-abc": {
+                    "rows": {"title": {"val": "DSH 会话标题"}}
+                }
+            }
+        }
+    }), encoding="utf-8")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    assert module._dsh_session_name("session-abc") == "DSH 会话标题"
+
+
+def test_dsh_stop_message_uses_transcript(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    dsh_home.mkdir(parents=True)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({"type": "session/title", "data": {"title": "来自 transcript 的标题"}}),
+        json.dumps({"type": "assistant/message", "data": {
+            "message": {
+                "content": [
+                    {"type": "reasoning", "text": "ignore me"},
+                    {"type": "text", "text": "最后一条助手消息"}
+                ]
+            }
+        }}),
+    ]), encoding="utf-8")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    payload = {
+        "session_id": "session-abc",
+        "transcript_path": str(transcript),
+        "cwd": str(tmp_path),
+        "hook_event_name": "Stop",
+        "last_assistant_message": None,
+    }
+    message = module.format_stop_message(payload, "dsh")
+    assert message.startswith("[来自 transcript 的标题]")
+    assert "最后一条助手消息" in message

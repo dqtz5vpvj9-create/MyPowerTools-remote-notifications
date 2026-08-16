@@ -45,13 +45,87 @@ def stable_client_msg_id(
 def client_name(client: str) -> str:
     if client == "codex":
         return "Codex"
+    if client == "dsh":
+        return "DeepSeek Harness"
     return "Claude Code"
 
 
-def get_session_name(session_id: str, client: str = "claude") -> str:
+def _dsh_home() -> str:
+    return os.environ.get("DSH_HOME") or os.path.expanduser("~/.dsh")
+
+
+def _read_transcript_lines(transcript_path: str) -> list:
+    if not transcript_path:
+        return []
+    try:
+        if transcript_path.endswith(".zstd"):
+            import zstandard
+            with open(transcript_path, "rb") as fh:
+                raw = zstandard.ZstdDecompressor().stream_reader(fh).read()
+            text = raw.decode("utf-8", errors="replace")
+        else:
+            with open(transcript_path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+    except Exception:
+        return []
+    lines = []
+    for line in text.splitlines():
+        try:
+            lines.append(json.loads(line))
+        except Exception:
+            continue
+    return lines
+
+
+def _dsh_session_name(session_id: str, transcript_path: str = "") -> str:
+    """Resolve a DSH session title from the projection cache, then transcript."""
+    if not session_id:
+        return ""
+    cache_path = os.path.join(_dsh_home(), "storages", "session_projcache.json")
+    try:
+        with open(cache_path, encoding="utf-8") as fh:
+            cache = json.load(fh)
+        row = (cache.get("tables", {}).get("sessions", {}).get(session_id) or {}).get("rows") or {}
+        title = (row.get("title") or {}).get("val")
+        if title:
+            return str(title)
+    except Exception:
+        pass
+    title = ""
+    for event in _read_transcript_lines(transcript_path):
+        if event.get("type") == "session/title":
+            candidate = (event.get("data") or {}).get("title")
+            if candidate:
+                title = str(candidate)
+    return title
+
+
+def _dsh_last_assistant_message(transcript_path: str) -> str:
+    """Return the last assistant text message from a DSH transcript."""
+    last = ""
+    for event in _read_transcript_lines(transcript_path):
+        if event.get("type") != "assistant/message":
+            continue
+        message = (event.get("data") or {}).get("message") or {}
+        parts = []
+        for block in message.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text")
+                if text:
+                    parts.append(str(text))
+        if parts:
+            last = "\n".join(parts).strip()
+    if len(last) > 2000:
+        last = last[:2000] + "…"
+    return last
+
+
+def get_session_name(session_id: str, client: str = "claude", transcript_path: str = "") -> str:
     """Look up the session name when the client stores session metadata."""
     if client == "codex":
         return _codex_thread_name(session_id)
+    if client == "dsh":
+        return _dsh_session_name(session_id, transcript_path)
     if client != "claude":
         return ""
     import glob
@@ -96,7 +170,7 @@ def _codex_thread_name(session_id: str) -> str:
 
 def label_for_payload(data: dict, client: str) -> str:
     session_id = data.get("session_id", "")
-    session_name = get_session_name(session_id, client)
+    session_name = get_session_name(session_id, client, data.get("transcript_path", ""))
     cwd = data.get("cwd", "")
     return session_name or os.path.basename(cwd) or client_name(client)
 
@@ -109,6 +183,8 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
     label = label_for_payload(data, client)
 
     last_msg = data.get("last_assistant_message", "")
+    if not last_msg and client == "dsh":
+        last_msg = _dsh_last_assistant_message(data.get("transcript_path", ""))
     if last_msg:
         return f"[{label}] {last_msg}"
     return f"[{label}] Task completed"
@@ -196,7 +272,7 @@ def main():
     parser.add_argument('message', nargs='?', default=None, help='Notification message')
     parser.add_argument('--channel', default='default', help='Channel name (default: default)')
     parser.add_argument('--icon', default='info', help='Icon name (default: info)')
-    parser.add_argument('--client', default='claude', choices=['claude', 'codex'],
+    parser.add_argument('--client', default='claude', choices=['claude', 'codex', 'dsh'],
                         help='Hook client for payload formatting')
     parser.add_argument('--stdin', action='store_true', help='Read message from stdin JSON from an agent hook')
     parser.add_argument('--hook', default=None,
@@ -236,7 +312,10 @@ def main():
         return
 
     session_id = str(data.get("session_id") or "") if args.stdin else ""
-    session_name = get_session_name(session_id, args.client) if session_id else ""
+    session_name = (
+        get_session_name(session_id, args.client, data.get("transcript_path", ""))
+        if session_id else ""
+    )
 
     # Debug: log what we're sending
     debug_log = f"/tmp/{args.client}_hook_debug.log"
