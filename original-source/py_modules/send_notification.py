@@ -166,11 +166,76 @@ def _codex_thread_name(session_id: str) -> str:
     return name
 
 
+def _codex_home() -> str:
+    return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+
+
+def _codex_last_user_message(session_id: str) -> str:
+    """Latest user prompt from the Codex rollout matching session_id."""
+    if not session_id:
+        return ""
+    import glob
+    pattern = os.path.join(_codex_home(), "sessions", "**", f"rollout-*-{session_id}.jsonl")
+    matches = glob.glob(pattern, recursive=True)
+    if not matches:
+        return ""
+    path = max(matches, key=os.path.getmtime)
+    last = ""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    event = json.loads(line)
+                except Exception:
+                    continue
+                if event.get("type") != "response_item":
+                    continue
+                payload = event.get("payload") or {}
+                if payload.get("type") != "message" or payload.get("role") != "user":
+                    continue
+                parts = []
+                for block in payload.get("content") or []:
+                    if isinstance(block, dict) and block.get("type") in ("input_text", "text"):
+                        text = block.get("text")
+                        if text:
+                            parts.append(str(text))
+                if parts:
+                    last = "\n".join(parts).strip()
+    except OSError:
+        return ""
+    return last
+
+
 def label_for_payload(data: dict, client: str) -> str:
     session_id = data.get("session_id", "")
     session_name = get_session_name(session_id, client, data.get("transcript_path", ""))
     cwd = data.get("cwd", "")
     return session_name or os.path.basename(cwd) or client_name(client)
+
+
+def _dsh_last_user_message(transcript_path: str) -> str:
+    """Last user prompt from a DSH transcript."""
+    last = ""
+    for event in _read_transcript_lines(transcript_path):
+        if event.get("type") != "user/message":
+            continue
+        data = event.get("data") or {}
+        source = data.get("source") or {}
+        if source.get("kind") not in (None, "user"):
+            continue
+        parts = []
+        for block in data.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text")
+                if text:
+                    parts.append(str(text))
+        if parts:
+            last = "\n".join(parts).strip()
+    return last
+
+
+def _quote_request(request: str) -> str:
+    return "\n".join(f"> {line}" for line in request.splitlines())
 
 
 def format_stop_message(data: dict, client: str = "claude") -> str:
@@ -183,6 +248,17 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
     last_msg = data.get("last_assistant_message", "")
     if not last_msg and client == "dsh":
         last_msg = _dsh_last_assistant_message(data.get("transcript_path", ""))
+    request = data.get("user_prompt") or ""
+    if not request:
+        if client == "dsh":
+            request = _dsh_last_user_message(data.get("transcript_path", ""))
+        elif client == "codex":
+            request = _codex_last_user_message(data.get("session_id", ""))
+    request = request.strip()
+    if request:
+        quote = _quote_request(request)
+        body = f"{quote}\n\n{last_msg or 'Task completed'}"
+        return f"[{label}] {body}"
     if last_msg:
         return f"[{label}] {last_msg}"
     return f"[{label}] Task completed"

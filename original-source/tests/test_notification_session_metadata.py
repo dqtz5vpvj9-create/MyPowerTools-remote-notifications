@@ -116,3 +116,56 @@ def test_dsh_stop_message_uses_transcript(tmp_path, monkeypatch):
     message = module.format_stop_message(payload, "dsh")
     assert message.startswith("[来自 transcript 的标题]")
     assert "最后一条助手消息" in message
+
+
+def test_dsh_stop_message_quotes_user_request(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    dsh_home.mkdir(parents=True)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({"type": "user/message", "data": {
+            "content": [{"type": "text", "text": "请分析 Choreo 报告"}],
+            "source": {"kind": "user"},
+        }}),
+        json.dumps({"type": "assistant/message", "data": {
+            "message": {"content": [{"type": "text", "text": "分析完成"}]}
+        }}),
+    ]), encoding="utf-8")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    payload = {
+        "session_id": "session-abc",
+        "transcript_path": str(transcript),
+        "cwd": str(tmp_path),
+        "hook_event_name": "Stop",
+        "last_assistant_message": None,
+    }
+    message = module.format_stop_message(payload, "dsh")
+    assert "> 请分析 Choreo 报告" in message
+    assert "分析完成" in message
+
+
+def test_codex_stop_message_quotes_user_request(tmp_path, monkeypatch):
+    codex_home = tmp_path / "codex-home"
+    session_dir = codex_home / "sessions" / "2026" / "08" / "16"
+    session_dir.mkdir(parents=True)
+    session_id = "00000000-0000-0000-0000-000000000000"
+    (session_dir / f"rollout-20260816-{session_id}.jsonl").write_text(
+        json.dumps({"type": "response_item", "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "把全文发给我"}],
+        }}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    module = load_send_module()
+    payload = {
+        "session_id": session_id,
+        "cwd": str(tmp_path),
+        "hook_event_name": "Stop",
+        "last_assistant_message": "这是回复",
+    }
+    message = module.format_stop_message(payload, "codex")
+    assert "> 把全文发给我" in message
+    assert "这是回复" in message
