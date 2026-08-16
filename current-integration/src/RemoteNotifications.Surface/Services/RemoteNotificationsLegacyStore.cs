@@ -502,13 +502,20 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         if (!string.IsNullOrEmpty(message))
         {
             var openingBracket = message.IndexOf('[');
-            if (openingBracket >= 0)
+            while (openingBracket >= 0)
             {
-                var closingBracket = message.IndexOf(']', openingBracket + 1);
-                if (closingBracket > openingBracket + 1)
+                var isLineStart = openingBracket == 0
+                    || message[openingBracket - 1] == '\n'
+                    || message[openingBracket - 1] == '\r';
+                if (isLineStart)
                 {
-                    return message[(openingBracket + 1)..closingBracket];
+                    var closingBracket = message.IndexOf(']', openingBracket + 1);
+                    if (closingBracket > openingBracket + 1)
+                    {
+                        return message[(openingBracket + 1)..closingBracket];
+                    }
                 }
+                openingBracket = message.IndexOf('[', openingBracket + 1);
             }
         }
 

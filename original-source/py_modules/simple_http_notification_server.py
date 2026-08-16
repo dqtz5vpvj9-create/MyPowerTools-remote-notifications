@@ -179,6 +179,18 @@ if fcm_paused:
     logger.info("FCM push disabled (paused). Set ENABLE_FCM=1 to re-enable.")
 
 
+PUSH_MESSAGE_MAX_BYTES = 3000
+
+
+def _push_message(message: str) -> tuple[str, str]:
+    """Fit push bodies under transport limits; mark truncation for the app."""
+    raw = str(message).encode("utf-8")
+    if len(raw) <= PUSH_MESSAGE_MAX_BYTES:
+        return str(message), "0"
+    preview = raw[:PUSH_MESSAGE_MAX_BYTES].decode("utf-8", errors="ignore")
+    return preview + "\n…[内容过长，正在同步完整内容]", "1"
+
+
 def send_unifiedpush(channel: str, message: str, icon: str = "info",
                      timestamp: str = "", notif_id: str = "",
                      session_id: str = "", session_name: str = "",
@@ -193,10 +205,12 @@ def send_unifiedpush(channel: str, message: str, icon: str = "info",
     endpoints = redis_conn.smembers(endpoint_key)
     if not endpoints:
         return
+    push_message, truncated = _push_message(message)
     payload = {
         "id": notif_id,
         "channel": channel,
-        "message": message,
+        "message": push_message,
+        "truncated": truncated,
         "icon": icon,
         "timestamp": timestamp,
         "schema_version": 2,
@@ -244,13 +258,15 @@ def send_fcm_push(channel: str, message: str, icon: str = "info", timestamp: str
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
+    push_message, truncated = _push_message(message)
     for token in tokens:
         payload = {
             "message": {
                 "token": token,
                 "data": {
                     "title": channel,
-                    "message": message,
+                    "message": push_message,
+                    "truncated": truncated,
                     "channel": channel,
                     "icon": icon,
                     "timestamp": timestamp,
