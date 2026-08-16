@@ -170,16 +170,19 @@ def _codex_home() -> str:
     return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
 
 
-def _codex_last_user_message(session_id: str) -> str:
-    """Latest user prompt from the Codex rollout matching session_id."""
-    if not session_id:
+def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
+    """Latest user prompt from the Codex rollout for a session."""
+    if not session_id and not transcript_path:
         return ""
-    import glob
-    pattern = os.path.join(_codex_home(), "sessions", "**", f"rollout-*-{session_id}.jsonl")
-    matches = glob.glob(pattern, recursive=True)
-    if not matches:
-        return ""
-    path = max(matches, key=os.path.getmtime)
+    if transcript_path:
+        path = transcript_path
+    else:
+        import glob
+        pattern = os.path.join(_codex_home(), "sessions", "**", f"rollout-*-{session_id}.jsonl")
+        matches = glob.glob(pattern, recursive=True)
+        if not matches:
+            return ""
+        path = max(matches, key=os.path.getmtime)
     last = ""
     try:
         with open(path, encoding="utf-8") as fh:
@@ -253,7 +256,9 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
         if client == "dsh":
             request = _dsh_last_user_message(data.get("transcript_path", ""))
         elif client == "codex":
-            request = _codex_last_user_message(data.get("session_id", ""))
+            request = _codex_last_user_message(
+                data.get("session_id", ""), data.get("transcript_path", "")
+            )
     request = request.strip()
     if request:
         quote = _quote_request(request)

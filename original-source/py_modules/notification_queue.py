@@ -440,6 +440,7 @@ def main() -> int:
     enqueue_parser.add_argument("--icon", default="info")
     enqueue_parser.add_argument("--client", default="claude", choices=["claude", "codex", "dsh"])
     enqueue_parser.add_argument("--stdin", action="store_true")
+    enqueue_parser.add_argument("--stdin-file", default=None)
     enqueue_parser.add_argument("--hook", default=None)
     enqueue_parser.add_argument("--no-start-worker", action="store_true")
 
@@ -450,7 +451,15 @@ def main() -> int:
         worker_loop()
         return 0
 
-    raw_stdin = sys.stdin.read() if args.stdin else None
+    raw_stdin = None
+    if args.stdin_file:
+        try:
+            with open(args.stdin_file, encoding="utf-8", errors="replace") as fh:
+                raw_stdin = fh.read()
+        except OSError:
+            raw_stdin = None
+    elif args.stdin:
+        raw_stdin = sys.stdin.read()
     item_id = enqueue(
         raw_stdin=raw_stdin,
         message=args.message,
