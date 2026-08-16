@@ -257,8 +257,8 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
     request = request.strip()
     if request:
         quote = _quote_request(request)
-        body = f"{quote}\n\n{last_msg or 'Task completed'}"
-        return f"[{label}] {body}"
+        body = f"{quote}\n\n[{label}] {last_msg or 'Task completed'}"
+        return body
     if last_msg:
         return f"[{label}] {last_msg}"
     return f"[{label}] Task completed"

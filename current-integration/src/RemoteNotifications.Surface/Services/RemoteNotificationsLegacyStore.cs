@@ -499,12 +499,16 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     public static string ExtractLabel(string message)
     {
-        if (!string.IsNullOrEmpty(message) && message[0] == '[')
+        if (!string.IsNullOrEmpty(message))
         {
-            var closingBracket = message.IndexOf(']');
-            if (closingBracket > 1)
+            var openingBracket = message.IndexOf('[');
+            if (openingBracket >= 0)
             {
-                return message[1..closingBracket];
+                var closingBracket = message.IndexOf(']', openingBracket + 1);
+                if (closingBracket > openingBracket + 1)
+                {
+                    return message[(openingBracket + 1)..closingBracket];
+                }
             }
         }
 
