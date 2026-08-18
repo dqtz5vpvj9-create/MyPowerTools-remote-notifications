@@ -171,6 +171,57 @@ def test_codex_stop_message_quotes_user_request(tmp_path, monkeypatch):
     assert "这是回复" in message
 
 
+def test_cursor_stop_message_reads_transcript(tmp_path):
+    conversation_id = "61e0d768-a565-4270-a0bc-d4288ef08d08"
+    transcript = tmp_path / "cursor.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({"role": "user", "message": {"content": [
+            {"type": "text", "text": "<timestamp>Tuesday</timestamp>\n<user_query>\n修一下通知正文\n</user_query>"}
+        ]}}),
+        json.dumps({"role": "assistant", "message": {"content": [
+            {"type": "text", "text": "已经从 transcript 取出 Cursor Remote 的回复。"}
+        ]}}),
+        json.dumps({"type": "turn_ended", "status": "success"}),
+    ]), encoding="utf-8")
+    module = load_send_module()
+    payload = {
+        "conversation_id": conversation_id,
+        "generation_id": "gen-1",
+        "cursor_version": "1.7.2",
+        "workspace_roots": [str(tmp_path / "MyPowerTools")],
+        "transcript_path": str(transcript),
+        "hook_event_name": "stop",
+        "status": "completed",
+        "session_id": conversation_id,
+    }
+    assert module._is_cursor_payload(payload)
+    message = module.format_stop_message(payload, "cursor")
+    assert message.startswith("> 修一下通知正文")
+    assert "[MyPowerTools] 已经从 transcript 取出 Cursor Remote 的回复。" in message
+
+
+def test_cursor_payload_overrides_claude_client(tmp_path):
+    transcript = tmp_path / "cursor.jsonl"
+    transcript.write_text(json.dumps({
+        "role": "assistant",
+        "message": {"content": [{"type": "text", "text": "只看这条助手消息"}]},
+    }), encoding="utf-8")
+    module = load_send_module()
+    payload = {
+        "conversation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "generation_id": "gen-2",
+        "cursor_version": "1.7.2",
+        "workspace_roots": [r"C:\work\demo"],
+        "transcript_path": str(transcript),
+        "hook_event_name": "stop",
+        "session_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    }
+    message = module.format_stop_message(payload, "claude")
+    assert "[demo] 只看这条助手消息" in message
+    assert "Task completed" not in message
+    assert module.client_name("cursor") == "Cursor"
+
+
 def test_banner_text_omits_quoted_user_request():
     sys.path.insert(0, str(ROOT))
     from py_modules.notification_banner import strip_leading_quoted_request

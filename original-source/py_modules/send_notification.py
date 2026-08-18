@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import sys
 import os
 from datetime import datetime, timezone
@@ -47,7 +48,121 @@ def client_name(client: str) -> str:
         return "Codex"
     if client == "dsh":
         return "DeepSeek Harness"
+    if client == "cursor":
+        return "Cursor"
     return "Claude Code"
+
+
+def _is_cursor_payload(data: dict) -> bool:
+    if data.get("cursor_version"):
+        return True
+    return isinstance(data.get("workspace_roots"), list) and bool(data.get("conversation_id"))
+
+
+def _content_text_parts(content) -> list[str]:
+    if not content:
+        return []
+    if isinstance(content, str):
+        return [content] if content.strip() else []
+    if isinstance(content, dict):
+        text = content.get("text") or content.get("input_text")
+        return [str(text)] if text else []
+    parts: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, str) and block.strip():
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") in (None, "text", "input_text"):
+                text = block.get("text") or block.get("input_text")
+                if text:
+                    parts.append(str(text))
+    return parts
+
+
+def _event_text(event: dict) -> str:
+    message = event.get("message")
+    if isinstance(message, str):
+        return message.strip()
+    content = None
+    if isinstance(message, dict):
+        content = message.get("content")
+        if not content:
+            content = message.get("text")
+    if content is None:
+        content = event.get("content") or event.get("text")
+    return "\n".join(_content_text_parts(content)).strip()
+
+
+def _last_role_text(lines: list, roles: set[str]) -> str:
+    last = ""
+    for event in lines:
+        role = str(event.get("role") or event.get("type") or "")
+        if role not in roles:
+            continue
+        text = _event_text(event)
+        if text:
+            last = text
+    return last
+
+
+def _clean_user_request(text: str) -> str:
+    if not text:
+        return ""
+    match = re.search(r"<user_query>\s*(.*?)\s*</user_query>", text, flags=re.S)
+    if match:
+        return match.group(1).strip()
+    cleaned = re.sub(r"<timestamp>.*?</timestamp>", "", text, flags=re.S)
+    return cleaned.strip()
+
+
+def _cursor_workspace_name(data: dict) -> str:
+    roots = data.get("workspace_roots") or []
+    if roots:
+        return os.path.basename(str(roots[0]).rstrip("\\/"))
+    cwd = data.get("cwd") or ""
+    if cwd:
+        return os.path.basename(str(cwd).rstrip("\\/"))
+    return ""
+
+
+def _cursor_fallback_transcript_path(data: dict) -> str:
+    conversation_id = str(data.get("conversation_id") or data.get("session_id") or "")
+    if not conversation_id:
+        return ""
+    projects = os.path.expanduser("~/.cursor/projects")
+    if not os.path.isdir(projects):
+        return ""
+    import glob
+    patterns = [
+        os.path.join(projects, "*", "agent-transcripts", conversation_id, f"{conversation_id}.jsonl"),
+        os.path.join(projects, "*", "agent-transcripts", f"{conversation_id}.jsonl"),
+    ]
+    matches: list[str] = []
+    for pattern in patterns:
+        matches.extend(glob.glob(pattern))
+    if not matches:
+        return ""
+    return max(matches, key=os.path.getmtime)
+
+
+def _cursor_transcript_lines(data: dict) -> list:
+    path = str(data.get("transcript_path") or "")
+    lines = _read_transcript_lines(path)
+    if lines:
+        return lines
+    return _read_transcript_lines(_cursor_fallback_transcript_path(data))
+
+
+def _cursor_session_name(data: dict, transcript_path: str = "") -> str:
+    path = transcript_path or str(data.get("transcript_path") or "") or _cursor_fallback_transcript_path(data)
+    for event in _read_transcript_lines(path):
+        if event.get("type") == "session/title":
+            title = (event.get("data") or {}).get("title")
+            if title:
+                return str(title)
+        if event.get("title"):
+            return str(event.get("title"))
+    return _cursor_workspace_name(data)
 
 
 def _dsh_home() -> str:
@@ -118,12 +233,14 @@ def _dsh_last_assistant_message(transcript_path: str) -> str:
     return last
 
 
-def get_session_name(session_id: str, client: str = "claude", transcript_path: str = "") -> str:
+def get_session_name(session_id: str, client: str = "claude", transcript_path: str = "", data: dict | None = None) -> str:
     """Look up the session name when the client stores session metadata."""
     if client == "codex":
         return _codex_thread_name(session_id)
     if client == "dsh":
         return _dsh_session_name(session_id, transcript_path)
+    if client == "cursor":
+        return _cursor_session_name(data or {}, transcript_path)
     if client != "claude":
         return ""
     import glob
@@ -210,10 +327,13 @@ def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
 
 
 def label_for_payload(data: dict, client: str) -> str:
-    session_id = data.get("session_id", "")
-    session_name = get_session_name(session_id, client, data.get("transcript_path", ""))
-    cwd = data.get("cwd", "")
-    return session_name or os.path.basename(cwd) or client_name(client)
+    session_id = data.get("session_id") or data.get("conversation_id") or ""
+    session_name = get_session_name(session_id, client, data.get("transcript_path", ""), data)
+    cwd = data.get("cwd") or ""
+    if not cwd:
+        roots = data.get("workspace_roots") or []
+        cwd = roots[0] if roots else ""
+    return session_name or os.path.basename(str(cwd).rstrip("\\/")) or client_name(client)
 
 
 def _dsh_last_user_message(transcript_path: str) -> str:
@@ -248,10 +368,15 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
     """
     label = label_for_payload(data, client)
 
-    last_msg = data.get("last_assistant_message", "")
+    last_msg = data.get("last_assistant_message") or data.get("text") or ""
+    if not isinstance(last_msg, str):
+        last_msg = ""
+    last_msg = last_msg.strip()
     if not last_msg and client == "dsh":
         last_msg = _dsh_last_assistant_message(data.get("transcript_path", ""))
-    request = data.get("user_prompt") or ""
+    if not last_msg and client in ("cursor", "claude"):
+        last_msg = _last_role_text(_cursor_transcript_lines(data), {"assistant", "assistant/message"})
+    request = data.get("user_prompt") or data.get("prompt") or ""
     if not request:
         if client == "dsh":
             request = _dsh_last_user_message(data.get("transcript_path", ""))
@@ -259,7 +384,9 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
             request = _codex_last_user_message(
                 data.get("session_id", ""), data.get("transcript_path", "")
             )
-    request = request.strip()
+        elif client in ("cursor", "claude"):
+            request = _last_role_text(_cursor_transcript_lines(data), {"user", "user/message"})
+    request = _clean_user_request(str(request).strip())
     if request:
         quote = _quote_request(request)
         body = f"{quote}\n\n[{label}] {last_msg or 'Task completed'}"
@@ -323,6 +450,9 @@ def normalize_hook_name(hook: str | None) -> str | None:
         "plan": "plan",
         "exitplanmode": "plan",
         "exit-plan-mode": "plan",
+        "afteragentresponse": "stop",
+        "agentresponse": "stop",
+        "agent-response": "stop",
     }
     return aliases.get(normalized, normalized)
 
@@ -351,7 +481,7 @@ def main():
     parser.add_argument('message', nargs='?', default=None, help='Notification message')
     parser.add_argument('--channel', default='default', help='Channel name (default: default)')
     parser.add_argument('--icon', default='info', help='Icon name (default: info)')
-    parser.add_argument('--client', default='claude', choices=['claude', 'codex', 'dsh'],
+    parser.add_argument('--client', default='claude', choices=['claude', 'codex', 'dsh', 'cursor'],
                         help='Hook client for payload formatting')
     parser.add_argument('--stdin', action='store_true', help='Read message from stdin JSON from an agent hook')
     parser.add_argument('--hook', default=None,
@@ -363,6 +493,9 @@ def main():
     args = parser.parse_args()
     hook = normalize_hook_name(args.hook)
     timestamp = normalize_timestamp(args.timestamp)
+    data = {}
+    raw = ""
+    client = args.client
 
     if args.stdin:
         try:
@@ -371,17 +504,22 @@ def main():
                 data = {}
             else:
                 data = json.loads(raw)
+            if not isinstance(data, dict):
+                data = {}
         except Exception:
             data = {}
 
+        if _is_cursor_payload(data):
+            client = "cursor"
+
         if hook == 'stop':
-            message = format_stop_message(data, args.client)
+            message = format_stop_message(data, client)
         elif hook in ('notification', 'permission'):
-            message = format_notification_message(data, args.client)
+            message = format_notification_message(data, client)
             if not message:
                 return
         elif hook == 'plan':
-            message = format_plan_message(data, args.client)
+            message = format_plan_message(data, client)
         else:
             message = data.get('message', data.get('title', str(data)))
     elif args.message:
@@ -390,31 +528,39 @@ def main():
         parser.error('message is required unless --stdin is used')
         return
 
-    session_id = str(data.get("session_id") or "") if args.stdin else ""
+    icon = args.icon
+    if client == "cursor" and icon in ("info", "claude"):
+        icon = "cursor"
+
+    session_id = str(data.get("session_id") or data.get("conversation_id") or "") if args.stdin else ""
     session_name = (
-        get_session_name(session_id, args.client, data.get("transcript_path", ""))
-        if session_id else ""
+        get_session_name(session_id, client, data.get("transcript_path", ""), data)
+        if args.stdin else ""
     )
 
     # Debug: log what we're sending
-    debug_log = f"/tmp/{args.client}_hook_debug.log"
-    with open(debug_log, 'w') as f:
-        f.write(f"hook={args.hook}\n")
-        if args.stdin:
-            f.write(f"raw_stdin_len={len(raw)}\n")
-            f.write(f"raw_stdin={raw[:500]}\n")
-            f.write(f"data_keys={list(data.keys()) if data else 'empty'}\n")
-        f.write(f"message={message}\n")
-        f.write(f"timestamp={timestamp}\n")
+    debug_log = f"/tmp/{client}_hook_debug.log"
+    try:
+        with open(debug_log, 'w') as f:
+            f.write(f"hook={args.hook}\n")
+            f.write(f"client={client}\n")
+            if args.stdin:
+                f.write(f"raw_stdin_len={len(raw)}\n")
+                f.write(f"raw_stdin={raw[:500]}\n")
+                f.write(f"data_keys={list(data.keys()) if data else 'empty'}\n")
+            f.write(f"message={message}\n")
+            f.write(f"timestamp={timestamp}\n")
+    except OSError:
+        debug_log = ""
 
     client_msg_id = args.client_msg_id or stable_client_msg_id(
         raw_stdin=raw if args.stdin else "",
         data=data if args.stdin else {},
         message=message,
         hook=hook,
-        client=args.client,
+        client=client,
         channel=args.channel,
-        icon=args.icon,
+        icon=icon,
     )
     notif_id = args.notif_id or client_msg_id
 
@@ -424,19 +570,23 @@ def main():
     sender.send(
         args.channel,
         message,
-        args.icon,
+        icon,
         notif_id=notif_id,
         client_msg_id=client_msg_id,
         timestamp=timestamp,
         session_id=session_id,
         session_name=session_name,
-        source_client=args.client,
+        source_client=client,
         schema_version=2,
         timeout=http_timeout,
     )
-    with open(debug_log, 'a') as f:
-        f.write(f"client_msg_id={client_msg_id}\n")
-        f.write(f"notif_id={notif_id}\n")
+    if debug_log:
+        try:
+            with open(debug_log, 'a') as f:
+                f.write(f"client_msg_id={client_msg_id}\n")
+                f.write(f"notif_id={notif_id}\n")
+        except OSError:
+            pass
 
     # Also send FCM push directly from this machine (server may not have Google connectivity)
     try:
@@ -444,18 +594,23 @@ def main():
         fcm_result = send_fcm_push(
             args.channel,
             message,
-            args.icon,
+            icon,
             timestamp=timestamp,
             notif_id=notif_id,
             session_id=session_id,
             session_name=session_name,
-            source_client=args.client,
+            source_client=client,
         )
-        with open(debug_log, 'a') as f:
-            f.write(f"fcm_result={json.dumps(fcm_result, sort_keys=True)}\n")
+        if debug_log:
+            with open(debug_log, 'a') as f:
+                f.write(f"fcm_result={json.dumps(fcm_result, sort_keys=True)}\n")
     except Exception as e:
-        with open(debug_log, 'a') as f:
-            f.write(f"fcm_error={type(e).__name__}: {str(e)[:240]}\n")
+        if debug_log:
+            try:
+                with open(debug_log, 'a') as f:
+                    f.write(f"fcm_error={type(e).__name__}: {str(e)[:240]}\n")
+            except OSError:
+                pass
 
 if __name__ == '__main__':
     main()

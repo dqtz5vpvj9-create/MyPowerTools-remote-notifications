@@ -212,7 +212,7 @@ def _fcm_message(message: str) -> tuple[str, str]:
     if len(raw) <= FCM_MESSAGE_MAX_BYTES:
         return str(message), "0"
     preview = raw[:FCM_MESSAGE_MAX_BYTES].decode("utf-8", errors="ignore")
-    return preview + "\n…[内容过长，正在同步完整内容]", "1"
+    return preview, "1"
 
 
 def send_fcm_push(

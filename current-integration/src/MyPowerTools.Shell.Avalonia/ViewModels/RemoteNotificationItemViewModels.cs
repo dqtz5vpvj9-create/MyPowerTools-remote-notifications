@@ -70,6 +70,7 @@ public sealed class RemoteNotificationMessageViewModel : ObservableViewModel
         "error" => "#E53935",
         "success" => "#43A047",
         "claude" => "#FFF7ED",
+        "cursor" => "#FFF7ED",
         "codex" => "#101828",
         _ => "#2979FF"
     };
@@ -77,6 +78,7 @@ public sealed class RemoteNotificationMessageViewModel : ObservableViewModel
     public string IconForeground => Icon switch
     {
         "claude" => "#D97706",
+        "cursor" => "#D97706",
         _ => "#FFFFFF"
     };
 
@@ -86,6 +88,7 @@ public sealed class RemoteNotificationMessageViewModel : ObservableViewModel
         "error" => "×",
         "success" => "✓",
         "claude" => "✦",
+        "cursor" => "◆",
         "codex" => "C",
         _ => "i"
     };
