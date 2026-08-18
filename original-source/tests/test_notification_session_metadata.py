@@ -169,3 +169,18 @@ def test_codex_stop_message_quotes_user_request(tmp_path, monkeypatch):
     message = module.format_stop_message(payload, "codex")
     assert "> 把全文发给我" in message
     assert "这是回复" in message
+
+
+def test_banner_text_omits_quoted_user_request():
+    sys.path.insert(0, str(ROOT))
+    from py_modules.notification_banner import strip_leading_quoted_request
+
+    quoted = "> 请分析 Choreo 报告\n> 第二行\n\n[来自 transcript 的标题] 分析完成"
+    banner = strip_leading_quoted_request(quoted)
+    assert banner == "[来自 transcript 的标题] 分析完成"
+    assert "请分析" not in banner
+    assert "第二行" not in banner
+
+    plain = "[build] complete"
+    assert strip_leading_quoted_request(plain) == plain
+    assert strip_leading_quoted_request("> just a quote") == "> just a quote"

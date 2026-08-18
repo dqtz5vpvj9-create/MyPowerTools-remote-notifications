@@ -14,6 +14,7 @@ def test_qt_toast_uses_page1_accepted_signal_only():
     assert "connect_safe(self.page1.accepted_msg_signal, self.on_received_msg)" in qt
     assert "received_msg_signal" not in qt
     assert 'notification_id = str(msg[4]) if len(msg) > 4 and msg[4] else ""' in qt
+    assert "strip_leading_quoted_request(content)" in qt
 
 
 def test_page1_carries_server_message_id_to_acceptance_boundary():

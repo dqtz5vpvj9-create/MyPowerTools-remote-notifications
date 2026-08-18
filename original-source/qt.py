@@ -332,15 +332,18 @@ class MainWindow(QMainWindow):
         # where label is the codex thread_name / claude session name. Promote
         # that label to the toast title so the desktop notification surfaces
         # which agent is asking for attention; the channel (always "default")
-        # is only useful when no label is present.
+        # is only useful when no label is present. Quoted user requests stay
+        # in the inbox body and must not occupy the OS banner.
+        from py_modules.notification_banner import strip_leading_quoted_request
         import re
-        m = re.match(r'^\[([^\]]+)\]\s*', content)
+        banner = strip_leading_quoted_request(content)
+        m = re.match(r'^\[([^\]]+)\]\s*', banner)
         if m:
             title = m.group(1)
-            body = content[m.end():]
+            body = banner[m.end():]
         else:
             title = channel or "Notification"
-            body = content
+            body = banner
         notification_id = str(msg[4]) if len(msg) > 4 and msg[4] else ""
         if not notification_id:
             notification_id = notification_message_id(channel, content, icon_name, timestamp)

@@ -351,6 +351,23 @@ public sealed class RemoteNotificationsProductTests
         Assert.DoesNotContain("scenario=", transient.ToXml(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Toast_omits_the_quoted_user_request_from_the_banner_body()
+    {
+        var notification = Message(
+            "quoted/id 42",
+            "> 把全文发给我\n> 第二行\n\n[build] **Complete**\nOpen it.",
+            DateTimeOffset.UtcNow);
+        var envelope = RemoteNotificationWindowsToastPublisher.BuildEnvelope(
+            notification, notification.Id, persistent: false);
+
+        Assert.Equal("build", envelope.Title);
+        Assert.Equal("**Complete** Open it.", envelope.Body);
+        Assert.DoesNotContain("把全文发给我", envelope.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("第二行", envelope.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain(">", envelope.Body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false, "")]
     [InlineData(true, "reminder")]

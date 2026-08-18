@@ -522,6 +522,47 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         return "(unlabeled)";
     }
 
+    /// <summary>
+    /// Inbox messages may quote the user request as a leading <c>&gt; ...</c>
+    /// block. OS banners should show the <c>[label] result</c> that follows,
+    /// not the question.
+    /// </summary>
+    public static string StripLeadingQuotedRequest(string message)
+    {
+        if (string.IsNullOrEmpty(message))
+        {
+            return message ?? "";
+        }
+
+        var lines = message.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var index = 0;
+        while (index < lines.Length && IsMarkdownQuoteLine(lines[index]))
+        {
+            index++;
+        }
+
+        if (index == 0)
+        {
+            return message;
+        }
+
+        while (index < lines.Length && string.IsNullOrWhiteSpace(lines[index]))
+        {
+            index++;
+        }
+
+        var remainder = string.Join('\n', lines.Skip(index));
+        return string.Equals(ExtractLabel(remainder), "(unlabeled)", StringComparison.Ordinal)
+            ? message
+            : remainder;
+    }
+
+    private static bool IsMarkdownQuoteLine(string line)
+    {
+        var trimmed = line.TrimStart();
+        return trimmed.StartsWith('>');
+    }
+
     public static string StableId(RemoteNotificationRecord message)
     {
         if (!string.IsNullOrWhiteSpace(message.Id))

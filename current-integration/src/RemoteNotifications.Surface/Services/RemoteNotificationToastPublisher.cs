@@ -90,7 +90,7 @@ public sealed class RemoteNotificationWindowsToastPublisher : IRemoteNotificatio
         string messageId,
         bool persistent)
     {
-        var sourceMessage = notification.Message ?? "";
+        var sourceMessage = RemoteNotificationsLegacyStore.StripLeadingQuotedRequest(notification.Message ?? "");
         var label = RemoteNotificationsLegacyStore.ExtractLabel(sourceMessage);
         var hasLabel = !string.Equals(label, "(unlabeled)", StringComparison.Ordinal);
         var prefix = hasLabel ? $"[{label}]" : "";

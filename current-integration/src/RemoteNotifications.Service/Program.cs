@@ -269,7 +269,7 @@ static int DispatchBanners(
 // Build a toast envelope identical in shape to RemoteNotificationWindowsToastPublisher.
 static WorkerToastEnvelope BuildToastEnvelope(RemoteNotificationRecord notification, bool persistent)
 {
-    var sourceMessage = notification.Message ?? "";
+    var sourceMessage = RemoteNotificationsLegacyStore.StripLeadingQuotedRequest(notification.Message ?? "");
     var label = RemoteNotificationsLegacyStore.ExtractLabel(sourceMessage);
     var hasLabel = !string.Equals(label, "(unlabeled)", StringComparison.Ordinal);
     var prefix = hasLabel ? $"[{label}]" : "";
