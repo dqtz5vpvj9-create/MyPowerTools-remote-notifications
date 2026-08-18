@@ -149,7 +149,7 @@
   "currentIntegrationGlobs": [
     "modules/android-tools-suite/**",
     "src/AndroidTools.MyPowerTools/**",
-    "src/AndroidTools.Powertoold/**",
+    "src/AndroidTools.Runtime/**",
     "src/MyPowerTools.Shell.Avalonia/**/*RemoteNotification*",
     "src/MyPowerTools.Tests/RemoteNotification*"
   ],

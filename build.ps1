@@ -38,7 +38,7 @@ New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 Copy-Item -Path (Join-Path $ToolRoot 'current-integration\modules\android-tools-suite\*') -Destination $OutputRoot -Recurse -Force
 
 $adapterProject = Join-Path $ToolRoot 'current-integration\src\AndroidTools.MyPowerTools\AndroidTools.MyPowerTools.csproj'
-$runtimeProject = Join-Path $ToolRoot 'current-integration\src\AndroidTools.Powertoold\AndroidTools.Powertoold.csproj'
+$runtimeProject = Join-Path $ToolRoot 'current-integration\src\AndroidTools.Runtime\AndroidTools.Runtime.csproj'
 $commonProperties = @(
     '-c', $Configuration,
     "/p:MyPowerToolsRepoRoot=$MyPowerToolsRepoRoot"

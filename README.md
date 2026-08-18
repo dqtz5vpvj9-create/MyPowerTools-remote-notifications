@@ -6,9 +6,9 @@ Remote Commands and Process Monitor modules.
 
 - `original-source/` preserves the current Python/PyQt implementation.
 - `current-integration/` contains the MyPowerTools adapter, package manifests,
-  native product UI source, and the `powertoold` runtime.
+  native product UI source, and the `AndroidTools.Runtime`.
 - `build.ps1` builds the adapter and publishes a self-contained Windows x64
-  `powertoold` runtime into `artifacts/package/android-tools-suite`.
+  `AndroidTools.Runtime` into `artifacts/package/android-tools-suite`.
 - `tool-release.json` defines the suite build output consumed by MyPowerTools.
 
 Build from a MyPowerTools checkout:

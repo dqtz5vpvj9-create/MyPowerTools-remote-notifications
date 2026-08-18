@@ -3,6 +3,6 @@
   "toolId": "remote-notifications",
   "suitePackageId": "android-tools-suite",
   "adapterProject": "current-integration/src/AndroidTools.MyPowerTools/AndroidTools.MyPowerTools.csproj",
-  "runtimeProject": "current-integration/src/AndroidTools.Powertoold/AndroidTools.Powertoold.csproj",
+  "runtimeProject": "current-integration/src/AndroidTools.Runtime/AndroidTools.Runtime.csproj",
   "packageOutput": "artifacts/package/android-tools-suite"
 }
