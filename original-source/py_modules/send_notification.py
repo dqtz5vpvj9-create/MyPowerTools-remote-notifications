@@ -407,7 +407,7 @@ def _claude_last_user_entry(data: dict) -> dict | None:
     return None
 
 
-def _claude_transcript_index(data: dict, max_lines: int = 8192) -> dict[str, dict]:
+def _claude_transcript_index(data: dict, max_lines: int = 512) -> dict[str, dict]:
     """Index the recent Claude JSONL entries by their explicit UUID.
 
     Claude's transcript is the source of origin metadata.  This index is only
@@ -434,6 +434,28 @@ def _claude_parent_uuid(entry: dict) -> str:
         or entry.get("parent_id")
         or ""
     ).strip()
+
+
+def _claude_ancestry_result(entries: dict[str, dict], event_uuid: str) -> tuple[bool, bool, str]:
+    """Return (complete, synthetic, human_request) for one UUID chain."""
+    current = entries.get(event_uuid)
+    if current is None:
+        return False, False, ""
+    visited: set[str] = set()
+    for _ in range(512):
+        parent_uuid = _claude_parent_uuid(current)
+        if not parent_uuid or parent_uuid in visited:
+            return True, False, ""
+        visited.add(parent_uuid)
+        parent = entries.get(parent_uuid)
+        if parent is None:
+            return False, False, ""
+        if _is_explicit_claude_automatic_entry(parent):
+            return True, True, ""
+        if str(parent.get("type") or "").strip().lower() == "user":
+            return True, False, _claude_entry_text(parent).strip()
+        current = parent
+    return True, False, ""
 
 
 def _is_explicit_claude_automatic_entry(entry: dict) -> bool:
@@ -468,22 +490,12 @@ def _claude_stop_has_synthetic_ancestor(data: dict, snapshot=None) -> bool:
     ).strip()
     if not event_uuid:
         return False
-    entries = _claude_transcript_index(data)
-    current = entries.get(event_uuid)
-    if current is None:
-        return False
-    visited: set[str] = set()
-    for _ in range(512):
-        parent_uuid = _claude_parent_uuid(current)
-        if not parent_uuid or parent_uuid in visited:
-            return False
-        visited.add(parent_uuid)
-        parent = entries.get(parent_uuid)
-        if parent is None:
-            return False
-        if _is_explicit_claude_automatic_entry(parent):
-            return True
-        current = parent
+    for max_lines in (512, 2048, 8192):
+        complete, synthetic, _ = _claude_ancestry_result(
+            _claude_transcript_index(data, max_lines=max_lines), event_uuid
+        )
+        if complete:
+            return synthetic
     return False
 
 
@@ -502,24 +514,12 @@ def _claude_parent_user_request(data: dict) -> str | None:
     ).strip()
     if not event_uuid:
         return None
-    entries = _claude_transcript_index(data)
-    current = entries.get(event_uuid)
-    if current is None:
-        return None
-    visited: set[str] = set()
-    for _ in range(512):
-        parent_uuid = _claude_parent_uuid(current)
-        if not parent_uuid or parent_uuid in visited:
-            return ""
-        visited.add(parent_uuid)
-        parent = entries.get(parent_uuid)
-        if parent is None:
-            return ""
-        if str(parent.get("type") or "").strip().lower() == "user":
-            if _has_synthetic_claude_origin(parent):
-                return ""
-            return _claude_entry_text(parent).strip()
-        current = parent
+    for max_lines in (512, 2048, 8192):
+        complete, synthetic, request = _claude_ancestry_result(
+            _claude_transcript_index(data, max_lines=max_lines), event_uuid
+        )
+        if complete:
+            return "" if synthetic else request
     return ""
 
 
