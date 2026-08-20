@@ -176,11 +176,13 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
                     continue;
                 }
 
-                var message = new RemoteNotificationMessageViewModel(notification);
-                Messages.Insert(0, message);
-                TouchLabel(message.Label);
+                if (!RemoteNotificationsLegacyStore.IsTaskCompletedRecord(notification))
+                {
+                    var message = new RemoteNotificationMessageViewModel(notification);
+                    Messages.Insert(0, message);
+                    TouchLabel(message.Label);
+                }
                 _store.SaveSeenMessageIds(_seenIds.OldestFirst);
-                PersistMessages();
                 _ = await _toastPublisher.PublishAsync(
                     notification,
                     id,
@@ -188,6 +190,9 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
                     cancellationToken).ConfigureAwait(true);
                 shown++;
             }
+
+            ApplyMergedHistoryToView();
+            PersistMessages();
 
             while (Messages.Count > RemoteNotificationsLegacyStore.MaximumMessages)
             {
@@ -324,6 +329,22 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
     private void PersistMessages()
     {
         _store.SaveMessages(Messages.Reverse().Select(message => message.Source).ToArray());
+    }
+
+    private void ApplyMergedHistoryToView()
+    {
+        var currentOldestFirst = Messages.Reverse().Select(message => message.Source).ToArray();
+        var merged = RemoteNotificationsLegacyStore.MergeTaskCompletedRecords(currentOldestFirst);
+        if (currentOldestFirst.SequenceEqual(merged))
+        {
+            return;
+        }
+
+        Messages.Clear();
+        foreach (var message in merged.Reverse())
+        {
+            Messages.Add(new RemoteNotificationMessageViewModel(message));
+        }
     }
 
     private void NotifyMessageViewChanged()

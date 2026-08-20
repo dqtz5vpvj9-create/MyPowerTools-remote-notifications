@@ -32,6 +32,86 @@ public sealed class RemoteNotificationsProductTests
     }
 
     [Fact]
+    public void Task_completed_merges_into_the_previous_same_session_reply()
+    {
+        var reply = new RemoteNotificationRecord(
+            "reply",
+            "default",
+            "[Claude Code] The work is complete.",
+            "claude",
+            "2026-08-18T12:00:00Z",
+            "2026-08-18T12:00:00Z",
+            "session-61",
+            "",
+            "claude");
+        var completed = new RemoteNotificationRecord(
+            "completed",
+            "default",
+            "[Claude Code] Task completed",
+            "claude",
+            "2026-08-18T12:38:00Z",
+            "2026-08-18T12:38:00Z",
+            "session-61",
+            "",
+            "claude");
+        var duplicate = completed with { Id = "completed-duplicate" };
+
+        var merged = RemoteNotificationsLegacyStore.MergeTaskCompletedRecords(
+            [reply, completed, duplicate]);
+
+        var result = Assert.Single(merged);
+        Assert.Equal("reply", result.Id);
+        Assert.Contains("The work is complete.", result.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Task completed", result.Message, StringComparison.Ordinal);
+        Assert.Equal("2026-08-18T12:38:00Z", result.ServerTimestamp);
+        Assert.True(RemoteNotificationsLegacyStore.IsTaskCompletedRecord(completed));
+    }
+
+    [Fact]
+    public async Task Task_completed_still_publishes_one_banner_without_creating_a_card()
+    {
+        var reply = new RemoteNotificationRecord(
+            "reply",
+            "default",
+            "[Claude Code] The work is complete.",
+            "claude",
+            "2026-08-18T12:00:00Z",
+            "2026-08-18T12:00:00Z",
+            "session-62",
+            "",
+            "claude");
+        var completed = new RemoteNotificationRecord(
+            "completed",
+            "default",
+            "[Claude Code] Task completed",
+            "claude",
+            "2026-08-18T12:38:00Z",
+            "2026-08-18T12:38:00Z",
+            "session-62",
+            "",
+            "claude");
+        var store = new FakeStore(new RemoteNotificationsSnapshot(
+            [reply],
+            ["Claude Code"],
+            null,
+            false));
+        var toasts = new FakeToastPublisher();
+        var viewModel = new RemoteNotificationsViewModel(
+            new RemoteNotificationsSnapshot([reply], ["Claude Code"], null, false),
+            store,
+            new FakePoller(new RemoteNotificationPullResult("ok", [completed], "")),
+            toasts);
+
+        await viewModel.PollAsync();
+
+        var card = Assert.Single(viewModel.Messages);
+        Assert.Equal("reply", card.Id);
+        Assert.Contains("Task completed", card.Message, StringComparison.Ordinal);
+        Assert.Equal("1", viewModel.Shown);
+        Assert.Equal("completed", Assert.Single(toasts.Published).MessageId);
+    }
+
+    [Fact]
     public void Detail_window_title_hides_the_internal_default_channel()
     {
         var defaultMessage = new RemoteNotificationMessageViewModel(

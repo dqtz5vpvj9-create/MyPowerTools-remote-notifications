@@ -104,6 +104,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 {
     public const string DefaultChannel = "default";
     public const string FilterAll = "__all__";
+    public const string TaskCompletedText = "Task completed";
     public const int MaximumMessages = 500;
     public const int MaximumRecentHashes = 200;
     public const int MaximumSeenMessageIds = 5000;
@@ -137,8 +138,8 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         }
 
         var originalMessages = ParseMessages(ReadText(key.GetValue("messages")));
-        var messages = CollapseClaudeStopDuplicates(originalMessages);
-        if (messages.Count != originalMessages.Count)
+        var messages = MergeTaskCompletedRecords(CollapseClaudeStopDuplicates(originalMessages));
+        if (!messages.SequenceEqual(originalMessages))
         {
             key.SetValue(
                 "messages",
@@ -195,7 +196,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return;
         }
 
-        var collapsed = CollapseClaudeStopDuplicates(messagesOldestFirst);
+        var collapsed = MergeTaskCompletedRecords(CollapseClaudeStopDuplicates(messagesOldestFirst));
         var retained = collapsed.Count <= MaximumMessages
             ? collapsed
             : collapsed.Skip(collapsed.Count - MaximumMessages).ToArray();
@@ -320,6 +321,113 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                 out var timestamp) ? timestamp : DateTimeOffset.MinValue)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Completion-only Claude/Cursor hook records still produce one banner,
+    /// yet they carry no conversational content for the inbox. Attach that
+    /// status to the nearest reply in the same session, preferring an earlier
+    /// reply, and keep the event out of the card list. Seen IDs are tracked by
+    /// the caller, so a merged event remains one-shot for banner delivery.
+    /// </summary>
+    public static IReadOnlyList<RemoteNotificationRecord> MergeTaskCompletedRecords(
+        IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
+    {
+        if (messagesOldestFirst.Count == 0)
+        {
+            return messagesOldestFirst;
+        }
+
+        var indexed = messagesOldestFirst
+            .Select((record, index) => (Record: record, Index: index))
+            .ToArray();
+        var replies = indexed
+            .Where(entry => !IsTaskCompletedRecord(entry.Record))
+            .ToArray();
+        var completionForReply = new Dictionary<int, RemoteNotificationRecord>();
+
+        foreach (var entry in indexed.Where(entry => IsTaskCompletedRecord(entry.Record)))
+        {
+            var sessionId = entry.Record.SessionId?.Trim() ?? "";
+            if (sessionId.Length == 0)
+            {
+                // The event still reaches the banner path, but it has no
+                // stable conversation owner for inbox attachment.
+                continue;
+            }
+
+            var target = replies.LastOrDefault(candidate =>
+                candidate.Index < entry.Index &&
+                string.Equals(candidate.Record.SessionId?.Trim(), sessionId, StringComparison.Ordinal));
+            if (target.Record is null)
+            {
+                target = replies.FirstOrDefault(candidate =>
+                    candidate.Index > entry.Index &&
+                    string.Equals(candidate.Record.SessionId?.Trim(), sessionId, StringComparison.Ordinal));
+            }
+            if (target.Record is not null)
+            {
+                completionForReply[target.Index] = entry.Record;
+            }
+        }
+
+        return replies
+            .Select(entry =>
+            {
+                if (!completionForReply.TryGetValue(entry.Index, out var completion))
+                {
+                    return entry.Record;
+                }
+
+                return entry.Record with
+                {
+                    Message = AppendTaskCompleted(entry.Record.Message),
+                    Timestamp = string.IsNullOrWhiteSpace(completion.Timestamp)
+                        ? entry.Record.Timestamp
+                        : completion.Timestamp,
+                    ServerTimestamp = string.IsNullOrWhiteSpace(completion.ServerTimestamp)
+                        ? entry.Record.ServerTimestamp
+                        : completion.ServerTimestamp
+                };
+            })
+            .ToArray();
+    }
+
+    public static bool IsTaskCompletedRecord(RemoteNotificationRecord message)
+    {
+        var source = message.SourceClient?.Trim() ?? "";
+        var icon = message.Icon?.Trim() ?? "";
+        var isClaudeFamily = source.Equals("claude", StringComparison.OrdinalIgnoreCase) ||
+                             source.Equals("cursor", StringComparison.OrdinalIgnoreCase) ||
+                             icon.Equals("claude", StringComparison.OrdinalIgnoreCase) ||
+                             icon.Equals("cursor", StringComparison.OrdinalIgnoreCase);
+        if (!isClaudeFamily)
+        {
+            return false;
+        }
+
+        var body = StripLeadingQuotedRequest(message.Message ?? "").Trim();
+        var label = ExtractLabel(body);
+        if (!string.Equals(label, "(unlabeled)", StringComparison.Ordinal) &&
+            body.StartsWith($"[{label}]", StringComparison.Ordinal))
+        {
+            body = body[(label.Length + 2)..].TrimStart();
+        }
+
+        return body.Equals(TaskCompletedText, StringComparison.OrdinalIgnoreCase) ||
+               body.Equals($"{TaskCompletedText}.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string AppendTaskCompleted(string message)
+    {
+        var trimmed = (message ?? "").TrimEnd();
+        if (trimmed.Length == 0 ||
+            trimmed.EndsWith(TaskCompletedText, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        return $"{trimmed}\n\n{TaskCompletedText}";
     }
 
     private static bool TryClaudeDuplicateKey(RemoteNotificationRecord message, out string key)

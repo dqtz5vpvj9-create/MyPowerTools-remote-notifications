@@ -229,9 +229,12 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                     continue;
                 }
 
-                var message = new RemoteNotificationMessageViewModel(notification);
-                Messages.Insert(0, message);
-                TouchLabel(message.Label);
+                if (!RemoteNotificationsLegacyStore.IsTaskCompletedRecord(notification))
+                {
+                    var message = new RemoteNotificationMessageViewModel(notification);
+                    Messages.Insert(0, message);
+                    TouchLabel(message.Label);
+                }
                 if (toastCount < maxToasts)
                 {
                     _ = await _toastPublisher.PublishAsync(
@@ -246,6 +249,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
             if (shown > 0)
             {
+                ApplyMergedHistoryToView();
                 var seenSnapshot = _seenIds.OldestFirst;
                 var messagesSnapshot = Messages.Reverse().Select(m => m.Source).ToArray();
                 await Task.Run(() =>
@@ -368,11 +372,9 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     {
         var snapshot = _store.Load();
         var persistedNewestFirst = snapshot.MessagesOldestFirst.Reverse().ToArray();
-        var currentIds = Messages.Select(message => message.Id).ToArray();
-        var persistedIds = persistedNewestFirst
-            .Select(RemoteNotificationsLegacyStore.StableId)
-            .ToArray();
-        if (!currentIds.SequenceEqual(persistedIds, StringComparer.Ordinal))
+        var currentSources = Messages.Select(message => message.Source).ToArray();
+        var persistedSources = persistedNewestFirst.ToArray();
+        if (!currentSources.SequenceEqual(persistedSources))
         {
             Messages.Clear();
             foreach (var message in persistedNewestFirst)
@@ -402,6 +404,22 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
             message.RefreshRelativeTime();
         }
         NotifyMessageViewChanged();
+    }
+
+    private void ApplyMergedHistoryToView()
+    {
+        var currentOldestFirst = Messages.Reverse().Select(message => message.Source).ToArray();
+        var merged = RemoteNotificationsLegacyStore.MergeTaskCompletedRecords(currentOldestFirst);
+        if (currentOldestFirst.SequenceEqual(merged))
+        {
+            return;
+        }
+
+        Messages.Clear();
+        foreach (var message in merged.Reverse())
+        {
+            Messages.Add(new RemoteNotificationMessageViewModel(message));
+        }
     }
 
     public void ClearMessages()
