@@ -407,7 +407,7 @@ def _claude_last_user_entry(data: dict) -> dict | None:
     return None
 
 
-def _claude_transcript_index(data: dict, max_lines: int = 2048) -> dict[str, dict]:
+def _claude_transcript_index(data: dict, max_lines: int = 8192) -> dict[str, dict]:
     """Index the recent Claude JSONL entries by their explicit UUID.
 
     Claude's transcript is the source of origin metadata.  This index is only
