@@ -218,6 +218,8 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                 .OrderBy(message => ParseSortTime(message.ServerTimestamp.Length > 0 ? message.ServerTimestamp : message.Timestamp))
                 .ToArray();
             var shown = 0;
+            var toastCount = 0;
+            const int maxToasts = 3;
             foreach (var notification in saneNotifications)
             {
                 var id = RemoteNotificationsLegacyStore.StableId(notification);
@@ -230,14 +232,42 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                 var message = new RemoteNotificationMessageViewModel(notification);
                 Messages.Insert(0, message);
                 TouchLabel(message.Label);
-                _store.SaveSeenMessageIds(_seenIds.OldestFirst);
-                PersistMessages();
+                if (toastCount < maxToasts)
+                {
+                    _ = await _toastPublisher.PublishAsync(
+                        notification,
+                        id,
+                        PersistentWindowsToasts,
+                        cancellationToken).ConfigureAwait(true);
+                }
+                toastCount++;
+                shown++;
+            }
+
+            if (shown > 0)
+            {
+                var seenSnapshot = _seenIds.OldestFirst;
+                var messagesSnapshot = Messages.Reverse().Select(m => m.Source).ToArray();
+                await Task.Run(() =>
+                {
+                    _store.SaveSeenMessageIds(seenSnapshot);
+                    _store.SaveMessages(messagesSnapshot);
+                }).ConfigureAwait(true);
+            }
+
+            if (shown > maxToasts)
+            {
+                var summaryRecord = new RemoteNotificationRecord(
+                    "summary",
+                    "Remote Notifications",
+                    $"{shown - maxToasts} more new notifications",
+                    "",
+                    DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
                 _ = await _toastPublisher.PublishAsync(
-                    notification,
-                    id,
+                    summaryRecord,
+                    "summary-batch",
                     PersistentWindowsToasts,
                     cancellationToken).ConfigureAwait(true);
-                shown++;
             }
 
             while (Messages.Count > RemoteNotificationsLegacyStore.MaximumMessages)
@@ -432,7 +462,11 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private void RebuildChips()
     {
         Chips.Clear();
-        if (KnownLabels.Count == 0)
+        // The Claude Task label has its own dedicated page — never a chip.
+        var chipLabels = KnownLabels
+            .Where(label => !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal))
+            .ToArray();
+        if (chipLabels.Length == 0)
         {
             OnPropertyChanged(nameof(HasLabels));
             OnPropertyChanged(nameof(ShowInboxLabels));
@@ -445,7 +479,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
             _filterLabel is null,
             false,
             SelectFilterAsync));
-        foreach (var label in KnownLabels)
+        foreach (var label in chipLabels)
         {
             Chips.Add(new RemoteNotificationLabelChipViewModel(
                 label,
@@ -466,6 +500,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
     private void NotifyMessageViewChanged()
     {
+        _cachedVisibleMessages = null;
         OnPropertyChanged(nameof(TotalCount));
         OnPropertyChanged(nameof(VisibleMessages));
         OnPropertyChanged(nameof(HasVisibleMessages));

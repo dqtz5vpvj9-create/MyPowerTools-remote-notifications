@@ -7,31 +7,69 @@ namespace RemoteNotifications.Surface.ViewModels;
 
 public sealed partial class RemoteNotificationsViewModel
 {
+    private IReadOnlyList<RemoteNotificationMessageViewModel>? _cachedVisibleMessages;
+
     public ObservableCollection<RemoteNotificationMessageViewModel> Messages { get; }
     public ObservableCollection<string> KnownLabels { get; }
     public ObservableCollection<RemoteNotificationLabelChipViewModel> Chips { get; }
     public ICommand RetryCommand { get; }
     public ICommand ToggleErrorDetailsCommand { get; }
     public string Server => _settings.Endpoint;
-    public bool HasLabels => KnownLabels.Count > 0;
+    // Chips exclude the Claude Task label (it has its own dedicated page),
+    // so HasLabels — which drives chip-strip visibility — must reflect
+    // the chip count, not the raw KnownLabels count.
+    public bool HasLabels =>
+        KnownLabels.Any(label => !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal));
     public string FilterLabel => _filterLabel ?? RemoteNotificationsLegacyStore.FilterAll;
     public int TotalCount => Messages.Count;
+
+    /** Fixed label produced by the Python sender for Claude Stop events
+     *  triggered by <task-notification> / isMeta / other synthetic user
+     *  injections. On the Inbox page these are hidden; the Claude Task page
+     *  shows only them. Chips omit this label — it lives on its own page. */
+    public const string ClaudeTaskLabel = "Claude Task";
 
     public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages
     {
         get
         {
-            var query = SearchQuery.Trim();
-            if (_filterLabel is null && query.Length == 0)
+            if (_cachedVisibleMessages is not null)
             {
-                return Messages;
+                return _cachedVisibleMessages;
             }
 
-            return Messages
+            var query = SearchQuery.Trim();
+
+            // Dedicated Claude Task page: ignore filterLabel entirely and
+            // show only the Claude Task-labeled items. Search still applies.
+            if (IsClaudeTaskVisible)
+            {
+                _cachedVisibleMessages = Messages
+                    .Where(message =>
+                        string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+                        (query.Length == 0 || message.MatchesSearch(query)))
+                    .ToArray();
+                return _cachedVisibleMessages;
+            }
+
+            // Main Inbox page: hide Claude Task items — they belong to
+            // the Claude Task page. Chip filter still narrows further
+            // when the user picks a per-session label.
+            if (_filterLabel is null && query.Length == 0)
+            {
+                _cachedVisibleMessages = Messages
+                    .Where(message => !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal))
+                    .ToArray();
+                return _cachedVisibleMessages;
+            }
+
+            _cachedVisibleMessages = Messages
                 .Where(message =>
+                    !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
                     (_filterLabel is null || string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)) &&
                     (query.Length == 0 || message.MatchesSearch(query)))
                 .ToArray();
+            return _cachedVisibleMessages;
         }
     }
 

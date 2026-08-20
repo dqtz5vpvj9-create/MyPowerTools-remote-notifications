@@ -16,6 +16,7 @@ public sealed partial class RemoteNotificationsViewModel
     private string _privateKeyPathDraft = RemoteNotificationSettings.DefaultPrivateKeyPath;
     private bool _keepWindowsBannersDraft;
     private bool _isSettingsVisible;
+    private bool _isClaudeTaskVisible;
     private bool _isSettingsOperationRunning;
     private string _settingsFeedback = "";
     private string _settingsFeedbackState = "idle";
@@ -25,6 +26,7 @@ public sealed partial class RemoteNotificationsViewModel
     public IReadOnlyList<string> ProtocolOptions { get; } = ["https", "http"];
     public ICommand ShowInboxCommand { get; private set; } = null!;
     public ICommand ShowSettingsCommand { get; private set; } = null!;
+    public ICommand ShowClaudeTaskCommand { get; private set; } = null!;
     public ICommand SaveSettingsCommand { get; private set; } = null!;
     public ICommand TestSettingsCommand { get; private set; } = null!;
     public ICommand ResetSettingsCommand { get; private set; } = null!;
@@ -44,10 +46,30 @@ public sealed partial class RemoteNotificationsViewModel
             OnPropertyChanged(nameof(IsInboxVisible));
             OnPropertyChanged(nameof(ShowSyncError));
             OnPropertyChanged(nameof(ShowInboxLabels));
+            NotifyMessageViewChanged();
         }
     }
 
-    public bool IsInboxVisible => !IsSettingsVisible;
+    public bool IsClaudeTaskVisible
+    {
+        get => _isClaudeTaskVisible;
+        private set
+        {
+            if (!SetProperty(ref _isClaudeTaskVisible, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(IsInboxVisible));
+            OnPropertyChanged(nameof(ShowSyncError));
+            OnPropertyChanged(nameof(ShowInboxLabels));
+            NotifyMessageViewChanged();
+        }
+    }
+
+    /** Inbox is the "default page" — visible iff no other page (Settings /
+     *  Claude Task) is currently active. */
+    public bool IsInboxVisible => !IsSettingsVisible && !IsClaudeTaskVisible;
     public bool ShowSyncError => IsInboxVisible && HasSyncError;
     public bool ShowInboxLabels => IsInboxVisible && HasLabels;
 
@@ -161,11 +183,19 @@ public sealed partial class RemoteNotificationsViewModel
         ShowInboxCommand = new MptAsyncRelayCommand(() =>
         {
             IsSettingsVisible = false;
+            IsClaudeTaskVisible = false;
             return Task.CompletedTask;
         });
         ShowSettingsCommand = new MptAsyncRelayCommand(() =>
         {
+            IsClaudeTaskVisible = false;
             IsSettingsVisible = true;
+            return Task.CompletedTask;
+        });
+        ShowClaudeTaskCommand = new MptAsyncRelayCommand(() =>
+        {
+            IsSettingsVisible = false;
+            IsClaudeTaskVisible = true;
             return Task.CompletedTask;
         });
         SaveSettingsCommand = new MptAsyncRelayCommand(SaveSettingsAsync);
