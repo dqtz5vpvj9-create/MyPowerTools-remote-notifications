@@ -15,6 +15,9 @@ from py_modules.simple_http_notification_sender import SimpleHttpNotificationSen
 from py_modules.logging_lib import setup_logging
 
 
+CLAUDE_TASK_LABEL = "Claude Task"
+
+
 def _canonical_json(data):
     return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -326,7 +329,145 @@ def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
     return last
 
 
+def _claude_entry_text(entry: dict) -> str:
+    """Text of one Claude transcript entry, mirroring agentsview's
+    ExtractTextContent: message.content text blocks first, then flat
+    message/text/body fallbacks."""
+    message = entry.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    if isinstance(message, dict):
+        content = message.get("content")
+        parts = []
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") in (None, "text", "input_text"):
+                    text = block.get("text") or block.get("input_text")
+                    if text:
+                        parts.append(str(text))
+                elif isinstance(block, str) and block.strip():
+                    parts.append(block)
+        elif isinstance(content, str) and content.strip():
+            parts.append(content)
+        if parts:
+            return "\n".join(parts).strip()
+        text = message.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    for key in ("text", "body", "content"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _tail_transcript_entries(transcript_path: str, max_lines: int = 64) -> list:
+    """Last JSONL entries of a Claude transcript, read from the tail so a
+    Stop hook never pays for a full re-read of a long session."""
+    if not transcript_path:
+        return []
+    try:
+        with open(transcript_path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            end = fh.tell()
+            buf = b""
+            while end > 0 and buf.count(b"\n") <= max_lines:
+                chunk = min(4096, end)
+                end -= chunk
+                fh.seek(end)
+                buf = fh.read(chunk) + buf
+    except OSError:
+        return []
+    entries = []
+    for line in buf.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except Exception:
+            continue
+    return entries
+
+
+def _claude_last_user_entry(data: dict) -> dict | None:
+    """Last user entry of the transcript that triggered the hook. Claude
+    Code synthetic injections (task-notification / isMeta / reminders /
+    interrupt markers) land in user entries; the hook payload itself often
+    carries no message body, so the transcript tail is the reliable source."""
+    for entry in reversed(_tail_transcript_entries(data.get("transcript_path") or "")):
+        if entry.get("type") == "user":
+            return entry
+    return None
+
+
+def _strip_system_reminders(text: str) -> tuple[str, bool]:
+    """Strip leading <system-reminder> blocks, agentsview-style. Only a
+    reminder-only entry is synthetic; a reminder glued onto a real prompt
+    leaves the prompt visible."""
+    rest = str(text).lstrip("\ufeff \t\r\n")
+    stripped = False
+    while rest.startswith("<system-reminder>"):
+        close = rest.find("</system-reminder>")
+        if close < 0:
+            break
+        rest = rest[close + len("</system-reminder>"):].lstrip("\ufeff \t\r\n")
+        stripped = True
+    return rest, stripped
+
+
+def _starts_with_synthetic_marker(text: str) -> bool:
+    """agentsview classifyClaudeSystemMessage: synthetic markers are
+    matched at line start only, never by substring, so a long user report
+    that merely mentions a marker stays a real message."""
+    stripped = str(text).lstrip("\ufeff \t\r\n")
+    if stripped.startswith((
+        "<task-notification>",
+        "This session is being continued",
+        "<local-command-caveat>",
+        "[Request interrupted",
+        "Stop hook feedback:",
+        "<command-message>",
+        "<command-name>",
+        "<local-command-",
+    )):
+        return True
+    rest, had_reminder = _strip_system_reminders(stripped)
+    return had_reminder and rest == ""
+
+
+def is_claude_task_notification(data: dict) -> bool:
+    """True when the Claude hook fired for a system-injected entry:
+    task-notification / isMeta / continuation / interrupt / stop-hook
+    feedback / command envelope / reminder-only. Structured transcript
+    flags win; text markers are prefix-matched. Real user prompts never
+    match, even when they quote or mention the markers."""
+    if data.get("isMeta") is True or str(data.get("isMeta") or "").lower() in ("true", "1"):
+        return True
+    entry_type = str(data.get("type") or "").strip()
+    if entry_type and entry_type not in ("user", "assistant"):
+        return True
+    payload_text = ""
+    message = data.get("message")
+    if isinstance(message, dict):
+        payload_text = _claude_entry_text({"message": message})
+    if not payload_text:
+        payload_text = _claude_entry_text(data)
+    if payload_text and _starts_with_synthetic_marker(payload_text):
+        return True
+    entry = _claude_last_user_entry(data)
+    if entry is not None:
+        if entry.get("isMeta") is True or str(entry.get("isMeta") or "").lower() in ("true", "1"):
+            return True
+        entry_text = _claude_entry_text(entry)
+        if entry_text and _starts_with_synthetic_marker(entry_text):
+            return True
+    return False
+
+
 def label_for_payload(data: dict, client: str) -> str:
+    if client == "claude" and is_claude_task_notification(data):
+        return CLAUDE_TASK_LABEL
     session_id = data.get("session_id") or data.get("conversation_id") or ""
     session_name = get_session_name(session_id, client, data.get("transcript_path", ""), data)
     cwd = data.get("cwd") or ""
@@ -367,6 +508,7 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
                   hook_event_name, stop_hook_active, last_assistant_message
     """
     label = label_for_payload(data, client)
+    claude_task = label == CLAUDE_TASK_LABEL
 
     last_msg = data.get("last_assistant_message") or data.get("text") or ""
     if not isinstance(last_msg, str):
@@ -387,7 +529,7 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
         elif client in ("cursor", "claude"):
             request = _last_role_text(_cursor_transcript_lines(data), {"user", "user/message"})
     request = _clean_user_request(str(request).strip())
-    if request:
+    if request and not claude_task:
         quote = _quote_request(request)
         body = f"{quote}\n\n[{label}] {last_msg or 'Task completed'}"
         return body
