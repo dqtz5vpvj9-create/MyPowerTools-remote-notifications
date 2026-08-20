@@ -261,8 +261,11 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 {
                     var state = ReadFileStateUnsafe();
                     var before = state.Messages;
+                    var beforeSeen = state.SeenMessageIds.ToArray();
                     state.Messages = CleanupClaudeStopNoise(state.Messages).ToList();
-                    if (!state.Messages.SequenceEqual(before))
+                    state.SeenMessageIds = SeenIdsForMessages(state.Messages);
+                    if (!state.Messages.SequenceEqual(before) ||
+                        !state.SeenMessageIds.SequenceEqual(beforeSeen))
                     {
                         state.KnownLabels = LabelsFor(state.Messages);
                         WriteFileStateUnsafe(state);
@@ -285,11 +288,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 {
                     MessagesOldestFirst = cleanedMessages,
                     KnownLabels = cleanedLabels,
-                    SeenMessageIds = cleanedMessages
-                        .SelectMany(message => new[] { StableId(message), FallbackId(message) })
-                        .Distinct(StringComparer.Ordinal)
-                        .TakeLast(MaximumSeenMessageIds)
-                        .ToArray()
+                    SeenMessageIds = SeenIdsForMessages(cleanedMessages)
                 };
                 WriteFileStateUnsafe(FromSnapshot(cleaned));
                 return cleaned;
@@ -366,11 +365,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 state.Messages = CleanupClaudeStopNoise(messagesOldestFirst)
                     .TakeLast(MaximumMessages)
                     .ToList();
-                foreach (var message in state.Messages)
-                {
-                    Remember(state.SeenMessageIds, StableId(message), MaximumSeenMessageIds);
-                    Remember(state.SeenMessageIds, FallbackId(message), MaximumSeenMessageIds);
-                }
+                state.SeenMessageIds = SeenIdsForMessages(state.Messages);
                 WriteFileStateUnsafe(state);
             });
             return;
@@ -599,6 +594,14 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             .TakeLast(MaximumSeenMessageIds)
             .ToList()
     };
+
+    private static List<string> SeenIdsForMessages(IEnumerable<RemoteNotificationRecord> messages) =>
+        messages
+            .SelectMany(message => new[] { StableId(message), FallbackId(message) })
+            .Where(messageId => !string.IsNullOrWhiteSpace(messageId))
+            .Distinct(StringComparer.Ordinal)
+            .TakeLast(MaximumSeenMessageIds)
+            .ToList();
 
     private static RemoteNotificationsSnapshot ToSnapshot(PersistedState state, bool persistent)
     {
