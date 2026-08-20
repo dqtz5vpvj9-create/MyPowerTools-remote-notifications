@@ -78,6 +78,14 @@ LABEL_UNLABELED = "(unlabeled)"
 FILTER_ALL = "__all__"
 
 
+def is_explicit_agent_internal(record: dict) -> bool:
+    """Filter only records carrying the sender-declared internal kind."""
+    return str(record.get("content_kind") or "").strip().lower() in {
+        "agent_internal",
+        "claude_agent_internal",
+    }
+
+
 def extract_label(message: str) -> str:
     m = _LABEL_REGEX.match(message or "")
     return m.group(1) if m else LABEL_UNLABELED
@@ -344,19 +352,25 @@ class Page1Worker(QThread):
                     n for n in notifications
                     if is_sane_server_ts(notification_cursor_ts(n))
                 ]
+                visible_notifications = [
+                    n for n in sane_notifications if not is_explicit_agent_internal(n)
+                ]
                 latest_ts = sane_notifications[0].get("timestamp", "") if sane_notifications else ""
                 latest_waterline = newest_sane_pull_waterline(sane_notifications)
                 if sane_notifications:
                     # Server returns newest-first; iterate oldest-first so UI gets them in order
-                    for n in reversed(sane_notifications):
+                    for n in reversed(visible_notifications):
                         ts = n.get("timestamp", "")
                         message = n.get("message", "")
                         icon = n.get("icon", "info")
                         channel = n.get("channel", "default")
+                        content_kind = n.get("content_kind", "")
                         notification_id = str(n.get("id") or n.get("message_id") or "")
                         if not message:
                             continue
-                        self.received_msg_signal.emit((channel, message, icon, ts, notification_id, True))
+                        self.received_msg_signal.emit((
+                            channel, message, icon, ts, notification_id, True, content_kind
+                        ))
                         emitted_count += 1
                     self.status_signal.emit("ok")
                     if latest_waterline:
@@ -628,6 +642,14 @@ class Page1(QWidget):
         for recent_id in list(self._recent_hashes):
             self._remember_seen_id(str(recent_id))
         persisted_msgs = json.loads(self._settings.value("messages", "[]"))
+        if isinstance(persisted_msgs, list):
+            filtered_persisted = [
+                message for message in persisted_msgs
+                if isinstance(message, dict) and not is_explicit_agent_internal(message)
+            ]
+            if len(filtered_persisted) != len(persisted_msgs):
+                persisted_msgs = filtered_persisted
+                self._settings.setValue("messages", json.dumps(persisted_msgs, ensure_ascii=False))
         for message in persisted_msgs:
             if not isinstance(message, dict):
                 continue
@@ -807,6 +829,7 @@ class Page1(QWidget):
                 m.get("timestamp", ""),
                 m.get("id", ""),
                 persist=False,
+                content_kind=m.get("content_kind", ""),
             )
 
         self._update_empty_state()
@@ -1046,6 +1069,9 @@ class Page1(QWidget):
         timestamp = msg[3] if len(msg) > 3 else ""
         notification_id = str(msg[4]) if len(msg) > 4 and msg[4] else ""
         should_notify = bool(msg[5]) if len(msg) > 5 else True
+        content_kind = str(msg[6]) if len(msg) > 6 and msg[6] else ""
+        if content_kind.strip().lower() in {"agent_internal", "claude_agent_internal"}:
+            return
 
         # Prefer the server message id. Fall back only for legacy server data.
         fallback_id = notification_message_id(channel, content, icon_name, timestamp)
@@ -1059,13 +1085,17 @@ class Page1(QWidget):
         self._remember_seen_id(fallback_id)
 
         self._touch_label(content)
-        self._append_item(channel, content, icon_name, timestamp, notification_id, persist=True)
+        self._append_item(
+            channel, content, icon_name, timestamp, notification_id,
+            persist=True, content_kind=content_kind,
+        )
         self._persist_state()
         if should_notify:
             self.accepted_msg_signal.emit((channel, content, icon_name, timestamp, h))
 
     def _append_item(self, channel: str, content: str, icon_name: str,
-                     timestamp: str, notification_id: str = "", persist: bool = False) -> None:
+                     timestamp: str, notification_id: str = "", persist: bool = False,
+                     content_kind: str = "") -> None:
         rel_display, abs_tooltip = format_relative_ts(timestamp)
 
         channel_display = channel if channel else "default"
@@ -1089,6 +1119,7 @@ class Page1(QWidget):
             "message": content,
             "icon": icon_name,
             "timestamp": timestamp,
+            "content_kind": content_kind,
         })
 
         row_widget = QWidget()

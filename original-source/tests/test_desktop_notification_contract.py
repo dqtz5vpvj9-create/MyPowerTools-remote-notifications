@@ -21,7 +21,8 @@ def test_page1_carries_server_message_id_to_acceptance_boundary():
     page1 = read_text("powertool/page1.py")
 
     assert 'notification_id = str(n.get("id") or n.get("message_id") or "")' in page1
-    assert "self.received_msg_signal.emit((channel, message, icon, ts, notification_id, True))" in page1
+    assert "channel, message, icon, ts, notification_id, True, content_kind" in page1
+    assert "def is_explicit_agent_internal(record: dict) -> bool:" in page1
     assert "notification_id or notification_message_id(channel, content, icon_name, timestamp)" in page1
     assert "if should_notify:" in page1
     assert "self.accepted_msg_signal.emit((channel, content, icon_name, timestamp, h))" in page1

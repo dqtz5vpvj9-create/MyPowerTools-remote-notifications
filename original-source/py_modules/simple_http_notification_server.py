@@ -102,66 +102,13 @@ scheduler_thread.start()
 redis_notifications = f"notifications_{cloud_server_port}"
 _history_cleanup_channels: set[str] = set()
 
-_CLAUDE_TASK_LABEL = "Claude Task"
-_CLAUDE_AUTO_FINGERPRINTS = (
-    "<task-notification>",
-    "Your previous response had no visible output",
-    "<command-message>",
-    "<command-name>",
-    "<local-command-",
-    "Stop hook feedback:",
-    "[Request interrupted",
-    "This session is being continued",
-    "Claude is waiting for your input",
-)
-_CLAUDE_LEGACY_AUTO_PREFIXES = ("Now the policy side:",)
+def _is_explicit_agent_internal(record: dict[str, Any]) -> bool:
+    """Use the sender's declared content kind as the only server filter."""
+    return str(record.get("content_kind") or "").strip().lower() == "agent_internal"
 
 
-def _strip_leading_quoted_request(message: str) -> tuple[str, bool, str]:
-    """Remove the transport's quoted human request before legacy matching."""
-    lines = str(message or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    index = 0
-    quoted: list[str] = []
-    while index < len(lines) and lines[index].lstrip().startswith(">"):
-        quoted.append(lines[index].lstrip()[1:].lstrip())
-        index += 1
-    had_quote = index > 0
-    while index < len(lines) and not lines[index].strip():
-        index += 1
-    remainder = "\n".join(lines[index:]).strip()
-    quoted_body = "\n".join(quoted).strip()
-    return (remainder if remainder else quoted_body), had_quote, quoted_body
-
-
-def _legacy_claude_automatic_record(record: dict[str, Any]) -> bool:
-    """Drop only recognizable old synthetic Claude records.
-
-    Historical records lack transcript origin metadata. A quoted request is
-    evidence of a human turn, so marker matching starts after that quote.
-    Modern records are blocked at the sender and are left alone here unless
-    they carry an explicit synthetic label/fingerprint.
-    """
-    source = str(record.get("source_client") or "").strip().lower()
-    icon = str(record.get("icon") or "").strip().lower()
-    if source != "claude" and icon != "claude":
-        return False
-    body, had_quote, quoted_body = _strip_leading_quoted_request(record.get("message") or "")
-    if quoted_body.startswith(_CLAUDE_AUTO_FINGERPRINTS):
-        return True
-    label = ""
-    if body.startswith("[") and "]" in body:
-        close = body.find("]")
-        label = body[1:close]
-        body = body[close + 1:].lstrip()
-    if label == _CLAUDE_TASK_LABEL:
-        return True
-    if len(body) <= 2000 and body.startswith(_CLAUDE_AUTO_FINGERPRINTS):
-        return True
-    return (not had_quote) and body.startswith(_CLAUDE_LEGACY_AUTO_PREFIXES)
-
-
-def _purge_legacy_claude_automatic(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [record for record in records if not _legacy_claude_automatic_record(record)]
+def _purge_explicit_agent_internal(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [record for record in records if not _is_explicit_agent_internal(record)]
 
 
 # Verify the connection
@@ -477,7 +424,7 @@ def _cleanup_notification_history(channel: str) -> None:
                     raw_records.append(_notification_record(json.loads(raw), channel))
                 except (TypeError, ValueError, json.JSONDecodeError):
                     continue
-            cleaned = _purge_legacy_claude_automatic(raw_records)
+            cleaned = _purge_explicit_agent_internal(raw_records)
             collapsed = _collapse_history_records(cleaned)
             if len(collapsed) != len(raw_records):
                 redis_conn.delete(notification_key)
@@ -550,12 +497,8 @@ def add_notification(message: str, channel: str, icon: str = "info",
                      source_message_id: str = "", content_kind: str = "",
                      stop_reason: str = "", schema_version: int = 2) -> dict[str, Any]:
     import uuid
-    if _legacy_claude_automatic_record({
-        "message": message,
-        "icon": icon,
-        "source_client": source_client,
-    }):
-        logger.info("Filtered synthetic Claude automatic Stop before Redis storage")
+    if str(content_kind or "").strip().lower() == "agent_internal":
+        logger.info("Filtered declared agent-internal notification before Redis storage")
         return {
             "status": "filtered",
             "stored_new": False,

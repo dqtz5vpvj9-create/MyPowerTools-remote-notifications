@@ -71,11 +71,11 @@ def test_server_source_keeps_legacy_records_readable():
     assert "results.append(_public_notification(record))" in source
 
 
-def test_server_source_purges_legacy_claude_automatic_records():
+def test_server_source_uses_explicit_content_kind_for_automatic_records():
     source = (ROOT / "py_modules" / "simple_http_notification_server.py").read_text(encoding="utf-8")
-    assert "def _legacy_claude_automatic_record" in source
-    assert "_purge_legacy_claude_automatic(raw_records)" in source
-    assert '"Claude is waiting for your input"' in source
+    assert '"content_kind": str(raw.get("content_kind") or "")' in source
+    assert 'str(content_kind or "").strip().lower() == "agent_internal"' in source
+    assert "_legacy_claude_automatic_record" not in source
 
 
 def test_dsh_session_name_from_projection_cache(tmp_path, monkeypatch):
@@ -133,27 +133,69 @@ def test_claude_classifier_drops_meta_task_notification(tmp_path):
             "type": "assistant",
             "message": {"content": [{"type": "text", "text": "自动进度回复"}]},
         }),
-    ]), encoding="utf-8")
+    ]) + "\n", encoding="utf-8")
     payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
     assert module.is_claude_task_notification(payload) is True
 
 
-def test_internal_agent_report_is_recognized_without_hiding_human_reports():
+def test_claude_origin_comes_from_parent_uuid_metadata(tmp_path, monkeypatch):
     module = load_send_module()
-    internal = (
-        "> 亲自巡查（不派子代理）：检查全部在跑实验 loop 日志；分析子代理是否返回；"
-        "有新结果立即分析并主动向用户汇报；无新进展则一句话说明。\n"
-        ">\n"
-        "[autodroid-52] 巡查小结 + 新动作：三轮画像构建全部失败，下一步补起 B07/B08；"
-        "监控确认进程在跑。"
+    monkeypatch.setenv("ANDROIDTOOLS_CLAUDE_STOP_STATE", str(tmp_path / "stop-state.json"))
+    transcript = tmp_path / "ancestry.jsonl"
+    report = (
+        "> 亲自巡查（不派子代理）：检查全部在跑实验 loop 日志。\n\n"
+        "[autodroid-52] 巡查小结 + 新动作：监控确认进程在跑。"
     )
-    assert module.is_internal_agent_communication(internal, "claude") is True
+    transcript.write_text("\n".join([
+        json.dumps({"type": "system", "subtype": "scheduled_task_fire", "uuid": "s0"}),
+        json.dumps({
+            "type": "user", "uuid": "u0", "parentUuid": "s0", "isMeta": True,
+            "promptSource": "system", "origin": {"kind": "task-notification"},
+            "message": {"role": "user", "content": "自动巡查入口"},
+        }),
+        json.dumps({
+            "type": "user", "uuid": "u1", "parentUuid": "u0",
+            "promptSource": "typed", "origin": {"kind": "human"},
+            "message": {"role": "user", "content": "人工补充问题"},
+        }),
+        json.dumps({
+            "type": "assistant", "uuid": "a0", "parentUuid": "u0",
+            "message": {"id": "m0", "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": report}]},
+        }),
+    ]) + "\n", encoding="utf-8")
+    payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
+    snapshot = module.inspect_claude_stop(payload)
+    assert snapshot is not None
+    assert module._claude_stop_has_synthetic_ancestor(payload, snapshot) is True
+    assert module.is_claude_task_notification(payload, snapshot) is True
 
-    human = (
-        "> 请分析这轮实验结果，并告诉我下一步怎么做。\n\n"
-        "[autodroid-52] 我已完成分析，下一步会给出结论和可复现步骤。"
+
+def test_claude_text_cannot_classify_an_unmarked_human_turn(tmp_path, monkeypatch):
+    module = load_send_module()
+    monkeypatch.setenv("ANDROIDTOOLS_CLAUDE_STOP_STATE", str(tmp_path / "stop-state.json"))
+    transcript = tmp_path / "human.jsonl"
+    report = (
+        "> 亲自巡查（不派子代理）：检查全部在跑实验 loop 日志。\n\n"
+        "[autodroid-52] 巡查小结 + 新动作：监控确认进程在跑。"
     )
-    assert module.is_internal_agent_communication(human, "claude") is False
+    transcript.write_text("\n".join([
+        json.dumps({
+            "type": "user", "uuid": "u1", "promptSource": "typed",
+            "origin": {"kind": "human"},
+            "message": {"role": "user", "content": "请分析实验"},
+        }),
+        json.dumps({
+            "type": "assistant", "uuid": "a1", "parentUuid": "u1",
+            "message": {"id": "m1", "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": report}]},
+        }),
+    ]) + "\n", encoding="utf-8")
+    payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
+    snapshot = module.inspect_claude_stop(payload)
+    assert snapshot is not None
+    assert module._claude_stop_has_synthetic_ancestor(payload, snapshot) is False
+    assert module.is_claude_task_notification(payload, snapshot) is False
 
 
 def test_dsh_stop_message_uses_transcript(tmp_path, monkeypatch):

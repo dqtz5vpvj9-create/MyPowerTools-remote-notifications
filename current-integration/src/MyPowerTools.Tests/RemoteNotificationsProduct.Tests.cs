@@ -68,7 +68,7 @@ public sealed class RemoteNotificationsProductTests
     }
 
     [Fact]
-    public void Internal_agent_coordination_report_is_filtered_but_human_report_survives()
+    public void Explicit_agent_internal_kind_is_filtered_but_human_kind_survives()
     {
         var internalMessage = new RemoteNotificationRecord(
             "internal",
@@ -79,11 +79,13 @@ public sealed class RemoteNotificationsProductTests
             "",
             "session-internal",
             "autodroid-52",
-            "claude");
+            "claude",
+            ContentKind: "agent_internal");
         var humanMessage = internalMessage with
         {
             Id = "human",
-            Message = "> 请分析这轮实验结果，并告诉我下一步怎么做。\n\n[autodroid-52] 我已完成分析，下一步会给出结论和可复现步骤。"
+            Message = "> 亲自巡查（不派子代理）：检查全部在跑实验 loop 日志。\n\n[autodroid-52] 人工回复保留。",
+            ContentKind = "text"
         };
 
         Assert.True(RemoteNotificationsLegacyStore.IsInternalAgentCommunication(internalMessage));

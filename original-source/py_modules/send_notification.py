@@ -367,7 +367,7 @@ def _claude_entry_text(entry: dict) -> str:
     return ""
 
 
-def _tail_transcript_entries(transcript_path: str, max_lines: int = 64) -> list:
+def _tail_transcript_entries(transcript_path: str, max_lines: int = 512) -> list:
     """Last JSONL entries of a Claude transcript, read from the tail so a
     Stop hook never pays for a full re-read of a long session."""
     if not transcript_path:
@@ -407,39 +407,120 @@ def _claude_last_user_entry(data: dict) -> dict | None:
     return None
 
 
-def _strip_system_reminders(text: str) -> tuple[str, bool]:
-    """Strip leading <system-reminder> blocks, agentsview-style. Only a
-    reminder-only entry is synthetic; a reminder glued onto a real prompt
-    leaves the prompt visible."""
-    rest = str(text).lstrip("\ufeff \t\r\n")
-    stripped = False
-    while rest.startswith("<system-reminder>"):
-        close = rest.find("</system-reminder>")
-        if close < 0:
-            break
-        rest = rest[close + len("</system-reminder>"):].lstrip("\ufeff \t\r\n")
-        stripped = True
-    return rest, stripped
+def _claude_transcript_index(data: dict, max_lines: int = 2048) -> dict[str, dict]:
+    """Index the recent Claude JSONL entries by their explicit UUID.
+
+    Claude's transcript is the source of origin metadata.  This index is only
+    used for ancestry traversal; message text never participates in the
+    automated/human decision.
+    """
+    path = str(data.get("transcript_path") or "")
+    entries = _tail_transcript_entries(path, max_lines=max_lines)
+    indexed: dict[str, dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        uuid = str(entry.get("uuid") or entry.get("id") or "").strip()
+        if uuid:
+            indexed[uuid] = entry
+    return indexed
 
 
-def _starts_with_synthetic_marker(text: str) -> bool:
-    """agentsview classifyClaudeSystemMessage: synthetic markers are
-    matched at line start only, never by substring, so a long user report
-    that merely mentions a marker stays a real message."""
-    stripped = str(text).lstrip("\ufeff \t\r\n")
-    if stripped.startswith((
-        "<task-notification>",
-        "This session is being continued",
-        "<local-command-caveat>",
-        "[Request interrupted",
-        "Stop hook feedback:",
-        "<command-message>",
-        "<command-name>",
-        "<local-command-",
-    )):
+def _claude_parent_uuid(entry: dict) -> str:
+    return str(
+        entry.get("parentUuid")
+        or entry.get("parent_uuid")
+        or entry.get("parentId")
+        or entry.get("parent_id")
+        or ""
+    ).strip()
+
+
+def _is_explicit_claude_automatic_entry(entry: dict) -> bool:
+    """Recognize only provider-declared synthetic transcript entries."""
+    if _has_synthetic_claude_origin(entry):
         return True
-    rest, had_reminder = _strip_system_reminders(stripped)
-    return had_reminder and rest == ""
+    if str(entry.get("type") or "").strip().lower() != "system":
+        return False
+    subtype = str(entry.get("subtype") or "").strip().lower()
+    return subtype in {
+        "scheduled_task_fire",
+        "task_notification",
+        "monitor",
+        "background",
+        "auto",
+    }
+
+
+def _claude_stop_has_synthetic_ancestor(data: dict, snapshot=None) -> bool:
+    """Follow the accepted assistant event's UUID ancestry to its origin.
+
+    AgentsView uses the same explicit Claude fields (`isMeta`, `promptSource`,
+    and `origin.kind`).  A missing UUID or an incomplete tail fails open so a
+    normal human reply remains visible; no report text is inspected.
+    """
+    event_uuid = str(
+        getattr(snapshot, "event_uuid", "")
+        or data.get("_mpt_claude_event_uuid")
+        or data.get("event_uuid")
+        or data.get("eventUuid")
+        or ""
+    ).strip()
+    if not event_uuid:
+        return False
+    entries = _claude_transcript_index(data)
+    current = entries.get(event_uuid)
+    if current is None:
+        return False
+    visited: set[str] = set()
+    for _ in range(512):
+        parent_uuid = _claude_parent_uuid(current)
+        if not parent_uuid or parent_uuid in visited:
+            return False
+        visited.add(parent_uuid)
+        parent = entries.get(parent_uuid)
+        if parent is None:
+            return False
+        if _is_explicit_claude_automatic_entry(parent):
+            return True
+        current = parent
+    return False
+
+
+def _claude_parent_user_request(data: dict) -> str | None:
+    """Return the explicit human prompt attached to the accepted event.
+
+    ``None`` means the transcript could not be indexed.  An empty string means
+    the ancestry is known and has no human prompt, so callers must not fall
+    back to a later synthetic user entry.
+    """
+    event_uuid = str(
+        data.get("_mpt_claude_event_uuid")
+        or data.get("event_uuid")
+        or data.get("eventUuid")
+        or ""
+    ).strip()
+    if not event_uuid:
+        return None
+    entries = _claude_transcript_index(data)
+    current = entries.get(event_uuid)
+    if current is None:
+        return None
+    visited: set[str] = set()
+    for _ in range(512):
+        parent_uuid = _claude_parent_uuid(current)
+        if not parent_uuid or parent_uuid in visited:
+            return ""
+        visited.add(parent_uuid)
+        parent = entries.get(parent_uuid)
+        if parent is None:
+            return ""
+        if str(parent.get("type") or "").strip().lower() == "user":
+            if _has_synthetic_claude_origin(parent):
+                return ""
+            return _claude_entry_text(parent).strip()
+        current = parent
+    return ""
 
 
 def _has_synthetic_claude_origin(entry: dict) -> bool:
@@ -455,81 +536,20 @@ def _has_synthetic_claude_origin(entry: dict) -> bool:
     return prompt_source in {"system", "task-notification", "monitor", "background", "auto"}
 
 
-def is_claude_task_notification(data: dict) -> bool:
-    """True when the Claude hook fired for a system-injected entry:
-    task-notification / isMeta / continuation / interrupt / stop-hook
-    feedback / command envelope / reminder-only. Structured transcript
-    flags win; text markers are prefix-matched. Real user prompts never
-    match, even when they quote or mention the markers."""
+def is_claude_task_notification(data: dict, snapshot=None) -> bool:
+    """True only when Claude declares an automatic/system-origin turn."""
     if _has_synthetic_claude_origin(data):
         return True
     entry_type = str(data.get("type") or "").strip()
     if entry_type and entry_type not in ("user", "assistant"):
         return True
-    payload_text = ""
-    message = data.get("message")
-    if isinstance(message, dict):
-        payload_text = _claude_entry_text({"message": message})
-    if not payload_text:
-        payload_text = _claude_entry_text(data)
-    if payload_text and _starts_with_synthetic_marker(payload_text):
+    if _claude_stop_has_synthetic_ancestor(data, snapshot):
         return True
     entry = _claude_last_user_entry(data)
     if entry is not None:
         if _has_synthetic_claude_origin(entry):
             return True
-        entry_text = _claude_entry_text(entry)
-        if entry_text and _starts_with_synthetic_marker(entry_text):
-            return True
     return False
-
-
-def is_internal_agent_communication(message: str, client: str = "claude") -> bool:
-    """Recognize the narrow quoted-instruction/agent-report envelope.
-
-    Claude's ordinary human conversations use the same quoted-request format,
-    so the guard requires both coordination instructions (subagent ownership,
-    user-report routing) and the distinctive live-experiment report shape.
-    """
-    if str(client).strip().lower() not in {"claude", "cursor"}:
-        return False
-    normalized = str(message or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = normalized.split("\n")
-    quote_lines = []
-    for line in lines:
-        if line.lstrip().startswith(">"):
-            quote_lines.append(line.lstrip()[1:].lstrip())
-        else:
-            break
-    if not quote_lines:
-        return False
-    body_lines = lines[len(quote_lines):]
-    while body_lines and not body_lines[0].strip():
-        body_lines.pop(0)
-    if not body_lines or not re.match(r"^\[[^\]]+\]\s*", body_lines[0].strip()):
-        return False
-    quoted = " ".join(line.strip() for line in quote_lines)
-    coordination_markers = (
-        "不派子代理",
-        "分析子代理",
-        "主动向用户汇报",
-        "无新进展则一句话",
-        "亲自巡查",
-    )
-    report_markers = (
-        "巡查小结",
-        "新动作",
-        "在跑",
-        "实验",
-        "下一步",
-        "子代理",
-        "loop",
-        "监控",
-        "进程",
-    )
-    coordination_score = sum(marker in quoted for marker in coordination_markers)
-    report_score = sum(marker.lower() in normalized.lower() for marker in report_markers)
-    return coordination_score >= 2 and report_score >= 3
 
 
 def label_for_payload(data: dict, client: str) -> str:
@@ -589,6 +609,7 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
         else:
             snapshot = inspect_claude_stop(data)
             if snapshot is not None and snapshot.is_visible_completion:
+                data["_mpt_claude_event_uuid"] = snapshot.event_uuid
                 last_msg = snapshot.text.strip()
     if not last_msg:
         last_msg = data.get("last_assistant_message") or data.get("text") or ""
@@ -607,7 +628,11 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
             request = _codex_last_user_message(
                 data.get("session_id", ""), data.get("transcript_path", "")
             )
-        elif client in ("cursor", "claude"):
+        elif client == "claude":
+            request = _claude_parent_user_request(data)
+            if request is None:
+                request = _last_role_text(_cursor_transcript_lines(data), {"user", "user/message"})
+        elif client == "cursor":
             request = _last_role_text(_cursor_transcript_lines(data), {"user", "user/message"})
     request = _clean_user_request(str(request).strip())
     if request and not claude_task:
@@ -743,7 +768,8 @@ def main():
                 # transcript lines, and repeated event identities stay out of
                 # the notification stream.
                 return
-            if is_claude_task_notification(data):
+            data["_mpt_claude_event_uuid"] = claude_claim.snapshot.event_uuid
+            if is_claude_task_notification(data, claude_claim.snapshot):
                 # Claude emits Stop hooks for automatic turns as well as for
                 # real human conversations. System/task-notification turns
                 # are background progress and must stay out of the stream;
@@ -763,13 +789,6 @@ def main():
         else:
             message = data.get('message', data.get('title', str(data)))
 
-        if hook == 'stop' and is_internal_agent_communication(message, client):
-            # Agent-to-agent status turns are internal coordination traffic.
-            # Release the Claude claim so the same transcript event remains
-            # eligible for a later genuine human-origin stop.
-            if claude_claim is not None:
-                release_claude_stop(claude_claim)
-            return
     elif args.message:
         message = args.message
     else:
