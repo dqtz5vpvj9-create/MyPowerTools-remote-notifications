@@ -397,10 +397,12 @@ def _tail_transcript_entries(transcript_path: str, max_lines: int = 512) -> list
 
 
 def _claude_last_user_entry(data: dict) -> dict | None:
-    """Last user entry of the transcript that triggered the hook. Claude
-    Code synthetic injections (task-notification / isMeta / reminders /
-    interrupt markers) land in user entries; the hook payload itself often
-    carries no message body, so the transcript tail is the reliable source."""
+    """Read the latest declared user record when the hook has no event UUID.
+
+    Production Stop hooks carry an accepted event UUID and use the anchored
+    parent-chain path. This compatibility path still relies on Claude's
+    explicit metadata; it never examines the record text.
+    """
     for entry in reversed(_tail_transcript_entries(data.get("transcript_path") or "")):
         if entry.get("type") == "user":
             return entry
@@ -545,11 +547,17 @@ def is_claude_task_notification(data: dict, snapshot=None) -> bool:
         return True
     if _claude_stop_has_synthetic_ancestor(data, snapshot):
         return True
+    event_uuid = str(
+        getattr(snapshot, "event_uuid", "")
+        or data.get("_mpt_claude_event_uuid")
+        or data.get("event_uuid")
+        or data.get("eventUuid")
+        or ""
+    ).strip()
+    if event_uuid:
+        return False
     entry = _claude_last_user_entry(data)
-    if entry is not None:
-        if _has_synthetic_claude_origin(entry):
-            return True
-    return False
+    return entry is not None and _has_synthetic_claude_origin(entry)
 
 
 def label_for_payload(data: dict, client: str) -> str:
