@@ -231,8 +231,8 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 {
                     var state = ReadFileStateUnsafe();
                     var before = state.Messages;
-                    state.Messages = CollapseClaudeStopDuplicates(state.Messages).ToList();
-                    if (state.Messages.Count != before.Count)
+                    state.Messages = CleanupClaudeStopNoise(state.Messages).ToList();
+                    if (!state.Messages.SequenceEqual(before))
                     {
                         state.KnownLabels = LabelsFor(state.Messages);
                         WriteFileStateUnsafe(state);
@@ -243,7 +243,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 var imported = _importLegacyRegistry
                     ? LoadRegistry(productSettings)
                     : new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
-                var cleanedMessages = CollapseClaudeStopDuplicates(imported.MessagesOldestFirst)
+                var cleanedMessages = CleanupClaudeStopNoise(imported.MessagesOldestFirst)
                     .Where(message => !message.Id.StartsWith("test-inject-", StringComparison.Ordinal))
                     .ToArray();
                 var cleanedLabels = cleanedMessages
@@ -282,7 +282,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
         }
 
-        var messages = CollapseClaudeStopDuplicates(ParseMessages(ReadText(key.GetValue("messages"))));
+        var messages = CleanupClaudeStopNoise(ParseMessages(ReadText(key.GetValue("messages"))));
         var knownLabels = ReadText(key.GetValue("known_labels"))
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
@@ -333,7 +333,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             WithFileLock(() =>
             {
                 var state = ReadFileStateUnsafe();
-                state.Messages = CollapseClaudeStopDuplicates(messagesOldestFirst)
+                state.Messages = CleanupClaudeStopNoise(messagesOldestFirst)
                     .TakeLast(MaximumMessages)
                     .ToList();
                 foreach (var message in state.Messages)
@@ -351,7 +351,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return;
         }
 
-        var collapsed = CollapseClaudeStopDuplicates(messagesOldestFirst);
+        var collapsed = CleanupClaudeStopNoise(messagesOldestFirst);
         var retained = collapsed.Count <= MaximumMessages
             ? collapsed
             : collapsed.Skip(collapsed.Count - MaximumMessages).ToArray();
@@ -572,9 +572,8 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     private static RemoteNotificationsSnapshot ToSnapshot(PersistedState state, bool persistent)
     {
-        var messages = CollapseClaudeStopDuplicates(state.Messages)
+        var messages = CleanupClaudeStopNoise(state.Messages)
             .Where(message => !string.IsNullOrWhiteSpace(message.Message))
-            .Select(RewriteAsClaudeTaskIfHistoricalTaskTriggered)
             .TakeLast(MaximumMessages)
             .ToArray();
         var labels = state.KnownLabels
@@ -643,6 +642,50 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         return kept
             .OrderBy(message => TryNotificationTime(message, out var time) ? time : DateTimeOffset.MinValue)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Keeps synthetic legacy Claude events on the dedicated Claude Task page
+    /// and removes ordinary legacy Claude Stop replies from the Inbox. Those
+    /// records have no source event identity, so they cannot be distinguished
+    /// from stale background-agent reports after the fact.
+    /// </summary>
+    public static IReadOnlyList<RemoteNotificationRecord> CleanupClaudeStopNoise(
+        IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
+    {
+        var cleaned = new List<RemoteNotificationRecord>(messagesOldestFirst.Count);
+        foreach (var message in CollapseClaudeStopDuplicates(messagesOldestFirst))
+        {
+            var rewritten = RewriteAsClaudeTaskIfHistoricalTaskTriggered(message);
+            if (IsLegacyClaudeStopNoise(rewritten))
+            {
+                continue;
+            }
+
+            cleaned.Add(rewritten);
+        }
+
+        return cleaned;
+    }
+
+    private static bool IsLegacyClaudeStopNoise(RemoteNotificationRecord message)
+    {
+        var source = message.SourceClient ?? "";
+        var icon = message.Icon ?? "";
+        var isClaude = string.Equals(source, "claude", StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(icon, "claude", StringComparison.OrdinalIgnoreCase);
+        if (!isClaude ||
+            !string.IsNullOrWhiteSpace(message.SourceEventId) ||
+            !string.IsNullOrWhiteSpace(message.SourceMessageId) ||
+            !string.IsNullOrWhiteSpace(message.ContentKind))
+        {
+            return false;
+        }
+
+        return !string.Equals(
+            ExtractLabel(message.Message),
+            ClaudeTaskLabel,
+            StringComparison.Ordinal);
     }
 
     private static bool TryClaudeDuplicateKey(RemoteNotificationRecord message, out string key)

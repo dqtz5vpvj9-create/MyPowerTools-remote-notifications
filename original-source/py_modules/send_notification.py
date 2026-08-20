@@ -682,6 +682,13 @@ def main():
                 # transcript lines, and repeated event identities stay out of
                 # the notification stream.
                 return
+            if not is_claude_task_notification(data):
+                # Claude emits a Stop hook after every ordinary assistant turn.
+                # Those long background-agent replies are transcript content,
+                # not remote task notifications. Keep synthetic task turns on
+                # the dedicated Claude Task route and drop ordinary replies.
+                release_claude_stop(claude_claim)
+                return
             data["_mpt_claude_visible_text"] = claude_claim.snapshot.text
 
         if hook == 'stop':
