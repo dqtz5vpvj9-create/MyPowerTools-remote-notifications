@@ -484,6 +484,54 @@ def is_claude_task_notification(data: dict) -> bool:
     return False
 
 
+def is_internal_agent_communication(message: str, client: str = "claude") -> bool:
+    """Recognize the narrow quoted-instruction/agent-report envelope.
+
+    Claude's ordinary human conversations use the same quoted-request format,
+    so the guard requires both coordination instructions (subagent ownership,
+    user-report routing) and the distinctive live-experiment report shape.
+    """
+    if str(client).strip().lower() not in {"claude", "cursor"}:
+        return False
+    normalized = str(message or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    quote_lines = []
+    for line in lines:
+        if line.lstrip().startswith(">"):
+            quote_lines.append(line.lstrip()[1:].lstrip())
+        else:
+            break
+    if not quote_lines:
+        return False
+    body_lines = lines[len(quote_lines):]
+    while body_lines and not body_lines[0].strip():
+        body_lines.pop(0)
+    if not body_lines or not re.match(r"^\[[^\]]+\]\s*", body_lines[0].strip()):
+        return False
+    quoted = " ".join(line.strip() for line in quote_lines)
+    coordination_markers = (
+        "不派子代理",
+        "分析子代理",
+        "主动向用户汇报",
+        "无新进展则一句话",
+        "亲自巡查",
+    )
+    report_markers = (
+        "巡查小结",
+        "新动作",
+        "在跑",
+        "实验",
+        "下一步",
+        "子代理",
+        "loop",
+        "监控",
+        "进程",
+    )
+    coordination_score = sum(marker in quoted for marker in coordination_markers)
+    report_score = sum(marker.lower() in normalized.lower() for marker in report_markers)
+    return coordination_score >= 2 and report_score >= 3
+
+
 def label_for_payload(data: dict, client: str) -> str:
     if client == "claude" and is_claude_task_notification(data):
         return CLAUDE_TASK_LABEL
@@ -714,6 +762,14 @@ def main():
             message = format_plan_message(data, client)
         else:
             message = data.get('message', data.get('title', str(data)))
+
+        if hook == 'stop' and is_internal_agent_communication(message, client):
+            # Agent-to-agent status turns are internal coordination traffic.
+            # Release the Claude claim so the same transcript event remains
+            # eligible for a later genuine human-origin stop.
+            if claude_claim is not None:
+                release_claude_stop(claude_claim)
+            return
     elif args.message:
         message = args.message
     else:

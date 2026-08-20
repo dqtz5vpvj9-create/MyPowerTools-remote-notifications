@@ -690,6 +690,10 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         var cleaned = new List<RemoteNotificationRecord>(messagesOldestFirst.Count);
         foreach (var message in CollapseClaudeStopDuplicates(messagesOldestFirst))
         {
+            if (IsInternalAgentCommunication(message))
+            {
+                continue;
+            }
             if (IsLegacyClaudeAutomaticReply(message))
             {
                 continue;
@@ -799,6 +803,70 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
         return body.Equals(TaskCompletedText, StringComparison.OrdinalIgnoreCase) ||
                body.Equals($"{TaskCompletedText}.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Detect the narrow quoted coordination-instruction plus agent-report
+    /// envelope emitted by Claude agent-to-agent status turns. Ordinary human
+    /// conversations use the same quote format and stay visible.
+    /// </summary>
+    public static bool IsInternalAgentCommunication(RemoteNotificationRecord message)
+    {
+        var source = message.SourceClient?.Trim() ?? "";
+        var icon = message.Icon?.Trim() ?? "";
+        var isClaudeFamily = source.Equals("claude", StringComparison.OrdinalIgnoreCase) ||
+                             source.Equals("cursor", StringComparison.OrdinalIgnoreCase) ||
+                             icon.Equals("claude", StringComparison.OrdinalIgnoreCase) ||
+                             icon.Equals("cursor", StringComparison.OrdinalIgnoreCase);
+        if (!isClaudeFamily)
+        {
+            return false;
+        }
+
+        var normalized = (message.Message ?? "")
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        var quoted = new List<string>();
+        var index = 0;
+        while (index < lines.Length && lines[index].TrimStart().StartsWith(">", StringComparison.Ordinal))
+        {
+            quoted.Add(lines[index].TrimStart()[1..].TrimStart());
+            index++;
+        }
+        if (quoted.Count == 0)
+        {
+            return false;
+        }
+        while (index < lines.Length && string.IsNullOrWhiteSpace(lines[index]))
+        {
+            index++;
+        }
+        if (index >= lines.Length)
+        {
+            return false;
+        }
+        var bodyStart = lines[index].Trim();
+        var close = bodyStart.IndexOf(']');
+        if (!bodyStart.StartsWith("[", StringComparison.Ordinal) || close <= 1)
+        {
+            return false;
+        }
+
+        var quotedText = string.Join(" ", quoted);
+        var coordinationMarkers = new[]
+        {
+            "不派子代理", "分析子代理", "主动向用户汇报", "无新进展则一句话", "亲自巡查"
+        };
+        var reportMarkers = new[]
+        {
+            "巡查小结", "新动作", "在跑", "实验", "下一步", "子代理", "loop", "监控", "进程"
+        };
+        var coordinationScore = coordinationMarkers.Count(marker =>
+            quotedText.Contains(marker, StringComparison.Ordinal));
+        var reportScore = reportMarkers.Count(marker =>
+            normalized.Contains(marker, StringComparison.OrdinalIgnoreCase));
+        return coordinationScore >= 2 && reportScore >= 3;
     }
 
     private static string AppendTaskCompleted(string message)

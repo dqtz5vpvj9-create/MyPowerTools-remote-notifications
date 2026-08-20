@@ -138,6 +138,24 @@ def test_claude_classifier_drops_meta_task_notification(tmp_path):
     assert module.is_claude_task_notification(payload) is True
 
 
+def test_internal_agent_report_is_recognized_without_hiding_human_reports():
+    module = load_send_module()
+    internal = (
+        "> 亲自巡查（不派子代理）：检查全部在跑实验 loop 日志；分析子代理是否返回；"
+        "有新结果立即分析并主动向用户汇报；无新进展则一句话说明。\n"
+        ">\n"
+        "[autodroid-52] 巡查小结 + 新动作：三轮画像构建全部失败，下一步补起 B07/B08；"
+        "监控确认进程在跑。"
+    )
+    assert module.is_internal_agent_communication(internal, "claude") is True
+
+    human = (
+        "> 请分析这轮实验结果，并告诉我下一步怎么做。\n\n"
+        "[autodroid-52] 我已完成分析，下一步会给出结论和可复现步骤。"
+    )
+    assert module.is_internal_agent_communication(human, "claude") is False
+
+
 def test_dsh_stop_message_uses_transcript(tmp_path, monkeypatch):
     dsh_home = tmp_path / "dsh-home"
     dsh_home.mkdir(parents=True)
