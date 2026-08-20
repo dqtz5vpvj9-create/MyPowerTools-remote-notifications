@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 using Microsoft.Win32;
 using MyPowerTools.RemoteNotifications.Configuration;
 
@@ -18,7 +19,14 @@ sealed record RemoteNotificationRecord(
     string Message,
     string Icon,
     string Timestamp,
-    string ServerTimestamp = "");
+    string ServerTimestamp = "",
+    string SessionId = "",
+    string SessionName = "",
+    string SourceClient = "",
+    string SourceEventId = "",
+    string SourceMessageId = "",
+    string ContentKind = "",
+    string StopReason = "");
 
 #if ANDROID_TOOLS_ADAPTER
 internal
@@ -99,6 +107,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     public const int MaximumMessages = 500;
     public const int MaximumRecentHashes = 200;
     public const int MaximumSeenMessageIds = 5000;
+    public const int ClaudeDuplicateWindowMinutes = 15;
 
     private const string RegistryPath = @"Software\AndroidTools\Page1";
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -121,13 +130,21 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
         }
 
-        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: false);
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: true);
         if (key is null)
         {
             return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
         }
 
-        var messages = ParseMessages(ReadText(key.GetValue("messages")));
+        var originalMessages = ParseMessages(ReadText(key.GetValue("messages")));
+        var messages = CollapseClaudeStopDuplicates(originalMessages);
+        if (messages.Count != originalMessages.Count)
+        {
+            key.SetValue(
+                "messages",
+                JsonSerializer.Serialize(messages, JsonOptions),
+                RegistryValueKind.String);
+        }
         var knownLabels = ReadText(key.GetValue("known_labels"))
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
@@ -178,9 +195,10 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return;
         }
 
-        var retained = messagesOldestFirst.Count <= MaximumMessages
-            ? messagesOldestFirst
-            : messagesOldestFirst.Skip(messagesOldestFirst.Count - MaximumMessages).ToArray();
+        var collapsed = CollapseClaudeStopDuplicates(messagesOldestFirst);
+        var retained = collapsed.Count <= MaximumMessages
+            ? collapsed
+            : collapsed.Skip(collapsed.Count - MaximumMessages).ToArray();
         var payload = retained.Select(message => new PersistedNotification
         {
             Id = message.Id,
@@ -188,7 +206,14 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             Message = message.Message,
             Icon = message.Icon,
             Timestamp = message.Timestamp,
-            ServerTimestamp = message.ServerTimestamp
+            ServerTimestamp = message.ServerTimestamp,
+            SessionId = message.SessionId,
+            SessionName = message.SessionName,
+            SourceClient = message.SourceClient,
+            SourceEventId = message.SourceEventId,
+            SourceMessageId = message.SourceMessageId,
+            ContentKind = message.ContentKind,
+            StopReason = message.StopReason
         }).ToArray();
 
         using var key = Registry.CurrentUser.CreateSubKey(RegistryPath, writable: true);
@@ -249,6 +274,76 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     public void ClearMessages()
     {
         WriteString("messages", "[]");
+    }
+
+    public static IReadOnlyList<RemoteNotificationRecord> CollapseClaudeStopDuplicates(
+        IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
+    {
+        if (messagesOldestFirst.Count < 2)
+        {
+            return messagesOldestFirst;
+        }
+
+        var kept = new List<RemoteNotificationRecord>(messagesOldestFirst.Count);
+        var recent = new Dictionary<string, (int Index, DateTimeOffset Time)>(StringComparer.Ordinal);
+        foreach (var message in messagesOldestFirst)
+        {
+            if (!TryClaudeDuplicateKey(message, out var key) ||
+                !DateTimeOffset.TryParse(
+                    string.IsNullOrWhiteSpace(message.ServerTimestamp) ? message.Timestamp : message.ServerTimestamp,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var timestamp))
+            {
+                kept.Add(message);
+                continue;
+            }
+
+            if (recent.TryGetValue(key, out var previous) &&
+                timestamp >= previous.Time &&
+                timestamp - previous.Time <= TimeSpan.FromMinutes(ClaudeDuplicateWindowMinutes))
+            {
+                kept[previous.Index] = message;
+                recent[key] = (previous.Index, timestamp);
+            }
+            else
+            {
+                recent[key] = (kept.Count, timestamp);
+                kept.Add(message);
+            }
+        }
+
+        return kept
+            .OrderBy(message => DateTimeOffset.TryParse(
+                string.IsNullOrWhiteSpace(message.ServerTimestamp) ? message.Timestamp : message.ServerTimestamp,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var timestamp) ? timestamp : DateTimeOffset.MinValue)
+            .ToArray();
+    }
+
+    private static bool TryClaudeDuplicateKey(RemoteNotificationRecord message, out string key)
+    {
+        var source = message.SourceClient.Trim().ToLowerInvariant();
+        var icon = message.Icon.Trim().ToLowerInvariant();
+        if (source != "claude" && icon != "claude")
+        {
+            key = "";
+            return false;
+        }
+        var body = StripLeadingQuotedRequest(message.Message ?? "").Trim();
+        var label = ExtractLabel(body);
+        if (label != "(unlabeled)" && body.StartsWith($"[{label}]", StringComparison.Ordinal))
+        {
+            body = body[(label.Length + 2)..].TrimStart();
+        }
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            key = "";
+            return false;
+        }
+        key = $"{message.SessionId.Trim()}\0{body}";
+        return true;
     }
 
     public static string ExtractLabel(string message)
@@ -343,7 +438,14 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                     message.Message ?? "",
                     string.IsNullOrWhiteSpace(message.Icon) ? "info" : message.Icon,
                     message.Timestamp ?? "",
-                    message.ServerTimestamp ?? ""))
+                    message.ServerTimestamp ?? "",
+                    message.SessionId ?? "",
+                    message.SessionName ?? "",
+                    message.SourceClient ?? "",
+                    message.SourceEventId ?? "",
+                    message.SourceMessageId ?? "",
+                    message.ContentKind ?? "",
+                    message.StopReason ?? ""))
                 .TakeLast(MaximumMessages)
                 .ToArray();
         }
@@ -424,5 +526,26 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
         [JsonPropertyName("server_timestamp")]
         public string? ServerTimestamp { get; init; }
+
+        [JsonPropertyName("session_id")]
+        public string? SessionId { get; init; }
+
+        [JsonPropertyName("session_name")]
+        public string? SessionName { get; init; }
+
+        [JsonPropertyName("source_client")]
+        public string? SourceClient { get; init; }
+
+        [JsonPropertyName("source_event_id")]
+        public string? SourceEventId { get; init; }
+
+        [JsonPropertyName("source_message_id")]
+        public string? SourceMessageId { get; init; }
+
+        [JsonPropertyName("content_kind")]
+        public string? ContentKind { get; init; }
+
+        [JsonPropertyName("stop_reason")]
+        public string? StopReason { get; init; }
     }
 }

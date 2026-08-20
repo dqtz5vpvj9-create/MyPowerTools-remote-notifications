@@ -15,7 +15,11 @@
     "server_timestamp": { "type": "string" },
     "session_id": { "type": "string", "maxLength": 128 },
     "session_name": { "type": "string", "maxLength": 512 },
-    "source_client": { "type": "string", "maxLength": 64 }
+    "source_client": { "type": "string", "maxLength": 64 },
+    "source_event_id": { "type": "string", "maxLength": 256 },
+    "source_message_id": { "type": "string", "maxLength": 256 },
+    "content_kind": { "type": "string", "maxLength": 64 },
+    "stop_reason": { "type": "string", "maxLength": 64 }
   },
   "additionalProperties": true
 }

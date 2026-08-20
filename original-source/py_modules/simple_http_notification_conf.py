@@ -49,7 +49,11 @@ add_schema = {
         "schema_version": {"type": "integer", "minimum": 1},
         "session_id": {"type": "string", "maxLength": 128},
         "session_name": {"type": "string", "maxLength": 512},
-        "source_client": {"type": "string", "maxLength": 64}
+        "source_client": {"type": "string", "maxLength": 64},
+        "source_event_id": {"type": "string", "maxLength": 256},
+        "source_message_id": {"type": "string", "maxLength": 256},
+        "content_kind": {"type": "string", "maxLength": 64},
+        "stop_reason": {"type": "string", "maxLength": 64}
     }
 }
 
@@ -66,7 +70,11 @@ result_schema = {
         "schema_version": {"type": "integer"},
         "session_id": {"type": "string"},
         "session_name": {"type": "string"},
-        "source_client": {"type": "string"}
+        "source_client": {"type": "string"},
+        "source_event_id": {"type": "string"},
+        "source_message_id": {"type": "string"},
+        "content_kind": {"type": "string"},
+        "stop_reason": {"type": "string"}
     }
 }
 

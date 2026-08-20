@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Globalization;
 using Microsoft.Win32;
 using MyPowerTools.RemoteNotifications.Configuration;
 
@@ -21,7 +22,11 @@ sealed record RemoteNotificationRecord(
     string ServerTimestamp = "",
     string SessionId = "",
     string SessionName = "",
-    string SourceClient = "");
+    string SourceClient = "",
+    string SourceEventId = "",
+    string SourceMessageId = "",
+    string ContentKind = "",
+    string StopReason = "");
 
 #if ANDROID_TOOLS_ADAPTER
 internal
@@ -103,6 +108,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     public const int MaximumMessages = 500;
     public const int MaximumRecentHashes = 200;
     public const int MaximumSeenMessageIds = 5000;
+    public const int ClaudeDuplicateWindowMinutes = 15;
 
     /** Fingerprints of a Claude Stop notification whose trigger was an
      *  auto-injected user turn (task-notification / isMeta / other
@@ -223,13 +229,21 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             {
                 if (File.Exists(_statePath))
                 {
-                    return ToSnapshot(ReadFileStateUnsafe(), productSettings.KeepWindowsBanners);
+                    var state = ReadFileStateUnsafe();
+                    var before = state.Messages;
+                    state.Messages = CollapseClaudeStopDuplicates(state.Messages).ToList();
+                    if (state.Messages.Count != before.Count)
+                    {
+                        state.KnownLabels = LabelsFor(state.Messages);
+                        WriteFileStateUnsafe(state);
+                    }
+                    return ToSnapshot(state, productSettings.KeepWindowsBanners);
                 }
 
                 var imported = _importLegacyRegistry
                     ? LoadRegistry(productSettings)
                     : new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
-                var cleanedMessages = imported.MessagesOldestFirst
+                var cleanedMessages = CollapseClaudeStopDuplicates(imported.MessagesOldestFirst)
                     .Where(message => !message.Id.StartsWith("test-inject-", StringComparison.Ordinal))
                     .ToArray();
                 var cleanedLabels = cleanedMessages
@@ -268,7 +282,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return new RemoteNotificationsSnapshot([], [], null, productSettings.KeepWindowsBanners, []);
         }
 
-        var messages = ParseMessages(ReadText(key.GetValue("messages")));
+        var messages = CollapseClaudeStopDuplicates(ParseMessages(ReadText(key.GetValue("messages"))));
         var knownLabels = ReadText(key.GetValue("known_labels"))
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
@@ -319,7 +333,9 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             WithFileLock(() =>
             {
                 var state = ReadFileStateUnsafe();
-                state.Messages = messagesOldestFirst.TakeLast(MaximumMessages).ToList();
+                state.Messages = CollapseClaudeStopDuplicates(messagesOldestFirst)
+                    .TakeLast(MaximumMessages)
+                    .ToList();
                 foreach (var message in state.Messages)
                 {
                     Remember(state.SeenMessageIds, StableId(message), MaximumSeenMessageIds);
@@ -335,9 +351,10 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             return;
         }
 
-        var retained = messagesOldestFirst.Count <= MaximumMessages
-            ? messagesOldestFirst
-            : messagesOldestFirst.Skip(messagesOldestFirst.Count - MaximumMessages).ToArray();
+        var collapsed = CollapseClaudeStopDuplicates(messagesOldestFirst);
+        var retained = collapsed.Count <= MaximumMessages
+            ? collapsed
+            : collapsed.Skip(collapsed.Count - MaximumMessages).ToArray();
         var payload = retained.Select(message => new PersistedNotification
         {
             Id = message.Id,
@@ -348,7 +365,11 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             ServerTimestamp = message.ServerTimestamp,
             SessionId = message.SessionId,
             SessionName = message.SessionName,
-            SourceClient = message.SourceClient
+            SourceClient = message.SourceClient,
+            SourceEventId = message.SourceEventId,
+            SourceMessageId = message.SourceMessageId,
+            ContentKind = message.ContentKind,
+            StopReason = message.StopReason
         }).ToArray();
 
         using var key = Registry.CurrentUser.CreateSubKey(RegistryPath, writable: true);
@@ -551,7 +572,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     private static RemoteNotificationsSnapshot ToSnapshot(PersistedState state, bool persistent)
     {
-        var messages = state.Messages
+        var messages = CollapseClaudeStopDuplicates(state.Messages)
             .Where(message => !string.IsNullOrWhiteSpace(message.Message))
             .Select(RewriteAsClaudeTaskIfHistoricalTaskTriggered)
             .TakeLast(MaximumMessages)
@@ -578,6 +599,100 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             Remember(seen, FallbackId(message), MaximumSeenMessageIds);
         }
         return new RemoteNotificationsSnapshot(messages, labels, state.FilterLabel, persistent, seen);
+    }
+
+    /// <summary>
+    /// Removes the burst produced when Claude Stop hooks replay one assistant
+    /// snapshot while a tool turn is still active.  Identity-aware sender
+    /// records are deduped by source event; legacy records use the stable
+    /// session/body tuple and a short time window so repeated notifications
+    /// from unrelated days remain visible.
+    /// </summary>
+    public static IReadOnlyList<RemoteNotificationRecord> CollapseClaudeStopDuplicates(
+        IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
+    {
+        if (messagesOldestFirst.Count < 2)
+        {
+            return messagesOldestFirst;
+        }
+
+        var kept = new List<RemoteNotificationRecord>(messagesOldestFirst.Count);
+        var recent = new Dictionary<string, (int Index, DateTimeOffset Time)>(StringComparer.Ordinal);
+        foreach (var message in messagesOldestFirst)
+        {
+            if (!TryClaudeDuplicateKey(message, out var key) ||
+                !TryNotificationTime(message, out var timestamp))
+            {
+                kept.Add(message);
+                continue;
+            }
+
+            if (recent.TryGetValue(key, out var previous) &&
+                timestamp >= previous.Time &&
+                timestamp - previous.Time <= TimeSpan.FromMinutes(ClaudeDuplicateWindowMinutes))
+            {
+                kept[previous.Index] = message;
+                recent[key] = (previous.Index, timestamp);
+                continue;
+            }
+
+            recent[key] = (kept.Count, timestamp);
+            kept.Add(message);
+        }
+
+        return kept
+            .OrderBy(message => TryNotificationTime(message, out var time) ? time : DateTimeOffset.MinValue)
+            .ToArray();
+    }
+
+    private static bool TryClaudeDuplicateKey(RemoteNotificationRecord message, out string key)
+    {
+        var source = message.SourceClient.Trim().ToLowerInvariant();
+        var icon = message.Icon.Trim().ToLowerInvariant();
+        if (!string.Equals(source, "claude", StringComparison.Ordinal) &&
+            !string.Equals(icon, "claude", StringComparison.Ordinal))
+        {
+            key = "";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(message.SessionId))
+        {
+            key = "";
+            return false;
+        }
+
+        var body = StripLeadingQuotedRequest(message.Message ?? "").Trim();
+        var label = ExtractLabel(body);
+        if (!string.Equals(label, "(unlabeled)", StringComparison.Ordinal) &&
+            body.StartsWith($"[{label}]", StringComparison.Ordinal))
+        {
+            body = body[(label.Length + 2)..].TrimStart();
+        }
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            key = "";
+            return false;
+        }
+        key = $"{message.SessionId.Trim()}\0{body}";
+        return true;
+    }
+
+    private static bool TryNotificationTime(RemoteNotificationRecord message, out DateTimeOffset timestamp)
+    {
+        return DateTimeOffset.TryParse(
+            string.IsNullOrWhiteSpace(message.ServerTimestamp) ? message.Timestamp : message.ServerTimestamp,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out timestamp);
+    }
+
+    private static List<string> LabelsFor(IEnumerable<RemoteNotificationRecord> messages)
+    {
+        return messages
+            .Select(message => ExtractLabel(message.Message))
+            .Reverse()
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     public static string ExtractLabel(string message)
@@ -686,7 +801,11 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                     message.ServerTimestamp ?? "",
                     message.SessionId ?? "",
                     message.SessionName ?? "",
-                    message.SourceClient ?? ""))
+                    message.SourceClient ?? "",
+                    message.SourceEventId ?? "",
+                    message.SourceMessageId ?? "",
+                    message.ContentKind ?? "",
+                    message.StopReason ?? ""))
                 .TakeLast(MaximumMessages)
                 .ToArray();
         }
@@ -776,6 +895,18 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
         [JsonPropertyName("source_client")]
         public string? SourceClient { get; init; }
+
+        [JsonPropertyName("source_event_id")]
+        public string? SourceEventId { get; init; }
+
+        [JsonPropertyName("source_message_id")]
+        public string? SourceMessageId { get; init; }
+
+        [JsonPropertyName("content_kind")]
+        public string? ContentKind { get; init; }
+
+        [JsonPropertyName("stop_reason")]
+        public string? StopReason { get; init; }
     }
 
     private sealed class PersistedState

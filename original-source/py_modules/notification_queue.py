@@ -111,7 +111,29 @@ def _client_msg_id(
             parsed = json.loads(raw_stdin) if raw_stdin.strip() else {}
         except Exception:
             parsed = raw_stdin
-        identity["payload"] = parsed
+        if (
+            client == "claude"
+            and str(hook or "").strip().lower() == "stop"
+            and isinstance(parsed, dict)
+        ):
+            # Stop payloads contain changing hook bookkeeping (prompt ids,
+            # timestamps, permission fields).  Those fields describe one
+            # event delivery attempt, not the assistant event itself.  Keep a
+            # compact semantic key in the short queue dedupe window; the
+            # transcript guard performs the durable identity check later.
+            identity["claude_stop"] = {
+                "session_id": str(parsed.get("session_id") or parsed.get("sessionId") or ""),
+                "transcript_path": str(parsed.get("transcript_path") or ""),
+                "event_uuid": str(parsed.get("uuid") or parsed.get("event_id") or ""),
+                "message_id": str(parsed.get("message_id") or ""),
+                "text": str(
+                    parsed.get("last_assistant_message")
+                    or parsed.get("text")
+                    or ""
+                ).strip(),
+            }
+        else:
+            identity["payload"] = parsed
     else:
         identity["message"] = message or ""
     return hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()[:32]

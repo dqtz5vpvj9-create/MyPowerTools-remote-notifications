@@ -98,6 +98,10 @@ class SimpleHttpNotificationSender:
         session_id: str = "",
         session_name: str = "",
         source_client: str = "",
+        source_event_id: str = "",
+        source_message_id: str = "",
+        content_kind: str = "",
+        stop_reason: str = "",
         schema_version: int = 2,
         timeout: float | None = None,
     ):
@@ -114,6 +118,14 @@ class SimpleHttpNotificationSender:
             data["session_name"] = session_name
         if source_client:
             data["source_client"] = source_client
+        if source_event_id:
+            data["source_event_id"] = source_event_id
+        if source_message_id:
+            data["source_message_id"] = source_message_id
+        if content_kind:
+            data["content_kind"] = content_kind
+        if stop_reason:
+            data["stop_reason"] = stop_reason
         data["schema_version"] = schema_version
         response = _http_post_json(
             f'{self.cloud_server_protocol}://{self.cloud_server_ip}:{self.cloud_server_port}/notification',
@@ -180,7 +192,9 @@ class MockSimpleHttpNotificationSender:
              notif_id: str = "", timestamp: str = "",
              client_msg_id: str = "",
              session_id: str = "", session_name: str = "",
-             source_client: str = "", schema_version: int = 2,
+             source_client: str = "", source_event_id: str = "",
+             source_message_id: str = "", content_kind: str = "",
+             stop_reason: str = "", schema_version: int = 2,
              timeout: float | None = None) -> None:
         self.logger.notice(message)
 

@@ -224,6 +224,10 @@ def send_fcm_push(
     session_id: str = "",
     session_name: str = "",
     source_client: str = "",
+    source_event_id: str = "",
+    source_message_id: str = "",
+    content_kind: str = "",
+    stop_reason: str = "",
 ) -> dict[str, Any]:
     """Send FCM data message to all registered tokens for a channel."""
     if not timestamp:
@@ -284,6 +288,10 @@ def send_fcm_push(
                     "session_id": session_id,
                     "session_name": session_name,
                     "source_client": source_client,
+                    "source_event_id": source_event_id,
+                    "source_message_id": source_message_id,
+                    "content_kind": content_kind,
+                    "stop_reason": stop_reason,
                 },
             }
         }

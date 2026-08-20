@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 
 import sys, importlib
 import time
@@ -99,6 +100,7 @@ scheduler_thread = threading.Thread(target=execute_scheduled_jobs)
 scheduler_thread.start()
 
 redis_notifications = f"notifications_{cloud_server_port}"
+_history_cleanup_channels: set[str] = set()
 # Verify the connection
 redis_connected = False
 for i in range(10):
@@ -194,7 +196,9 @@ def _push_message(message: str) -> tuple[str, str]:
 def send_unifiedpush(channel: str, message: str, icon: str = "info",
                      timestamp: str = "", notif_id: str = "",
                      session_id: str = "", session_name: str = "",
-                     source_client: str = "") -> None:
+                     source_client: str = "", source_event_id: str = "",
+                     source_message_id: str = "", content_kind: str = "",
+                     stop_reason: str = "") -> None:
     """POST notification to every registered UnifiedPush endpoint URL for a channel.
 
     UnifiedPush endpoints are opaque URLs supplied by the phone-side distributor
@@ -217,6 +221,10 @@ def send_unifiedpush(channel: str, message: str, icon: str = "info",
         "session_id": session_id,
         "session_name": session_name,
         "source_client": source_client,
+        "source_event_id": source_event_id,
+        "source_message_id": source_message_id,
+        "content_kind": content_kind,
+        "stop_reason": stop_reason,
     }
     body = json.dumps(payload)
     headers = {"Content-Type": "application/json"}
@@ -240,7 +248,9 @@ def send_unifiedpush(channel: str, message: str, icon: str = "info",
 
 
 def send_fcm_push(channel: str, message: str, icon: str = "info", timestamp: str = "", notif_id: str = "",
-                  session_id: str = "", session_name: str = "", source_client: str = "") -> None:
+                  session_id: str = "", session_name: str = "", source_client: str = "",
+                  source_event_id: str = "", source_message_id: str = "",
+                  content_kind: str = "", stop_reason: str = "") -> None:
     """Send FCM data messages via HTTP v1 API to all registered tokens for a channel."""
     if not fcm_enabled:
         return
@@ -275,6 +285,10 @@ def send_fcm_push(channel: str, message: str, icon: str = "info", timestamp: str
                     "session_id": session_id,
                     "session_name": session_name,
                     "source_client": source_client,
+                    "source_event_id": source_event_id,
+                    "source_message_id": source_message_id,
+                    "content_kind": content_kind,
+                    "stop_reason": stop_reason,
                 },
             }
         }
@@ -315,6 +329,101 @@ def _dedupe_key(channel: str, client_msg_id: str) -> str:
     return f"notification_dedupe:{cloud_server_port}:{channel}:{client_msg_id}"
 
 
+def _source_event_dedupe_key(
+    channel: str,
+    source_client: str,
+    session_id: str,
+    source_message_id: str,
+    source_event_id: str,
+    message: str,
+) -> str:
+    """Stable semantic key for transcript-backed assistant events."""
+    digest = hashlib.sha256(str(message).strip().encode("utf-8")).hexdigest()[:24]
+    identity = "|".join((
+        str(source_client).strip().lower(),
+        str(session_id).strip(),
+        str(source_message_id).strip(),
+        str(source_event_id).strip(),
+        digest,
+    ))
+    return f"notification_source_event:{cloud_server_port}:{channel}:{identity}"
+
+
+def _history_duplicate_key(record: dict[str, Any]) -> str | None:
+    source = str(record.get("source_client") or "").strip().lower()
+    if source != "claude":
+        return None
+    session = str(record.get("session_id") or "").strip()
+    if not session:
+        return None
+    body = str(record.get("message") or "").strip()
+    # Remove a leading quoted request and the display label.  History entries
+    # from before session metadata was added still carry source_client/session_id
+    # in the affected burst, so this remains safely scoped to that session.
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    while lines and lines[0].lstrip().startswith(">"):
+        lines.pop(0)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    body = "\n".join(lines).strip()
+    if body.startswith("[") and "]" in body:
+        body = body[body.find("]") + 1:].strip()
+    return f"{session}\0{body}" if body else None
+
+
+def _collapse_history_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the newest item in each short Claude duplicate burst."""
+    if len(records) < 2:
+        return records
+    # Redis stores newest first; collapse in chronological order.
+    chronological = list(reversed(records))
+    retained: list[dict[str, Any]] = []
+    recent: dict[str, tuple[int, datetime_class]] = {}
+    for record in chronological:
+        key = _history_duplicate_key(record)
+        try:
+            timestamp = parse_utc(str(record.get("server_timestamp") or record.get("timestamp") or ""))
+        except Exception:
+            timestamp = None
+        if key is None or timestamp is None:
+            retained.append(record)
+            continue
+        previous = recent.get(key)
+        if previous and timestamp >= previous[1] and timestamp - previous[1] <= timedelta(minutes=15):
+            retained[previous[0]] = record
+            recent[key] = (previous[0], timestamp)
+        else:
+            recent[key] = (len(retained), timestamp)
+            retained.append(record)
+    return list(reversed(retained))
+
+
+def _cleanup_notification_history(channel: str) -> None:
+    if channel in _history_cleanup_channels:
+        return
+    notification_key = f"{redis_notifications}:{channel}"
+    lock_key = f"lock:{notification_key}"
+    try:
+        with redis_conn.lock(lock_key, timeout=5):
+            raw_records = []
+            for index in range(redis_conn.llen(notification_key)):
+                raw = redis_conn.lindex(notification_key, index)
+                if not raw:
+                    continue
+                try:
+                    raw_records.append(_notification_record(json.loads(raw), channel))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+            collapsed = _collapse_history_records(raw_records)
+            if len(collapsed) != len(raw_records):
+                redis_conn.delete(notification_key)
+                for record in collapsed:
+                    redis_conn.rpush(notification_key, json.dumps(record))
+            _history_cleanup_channels.add(channel)
+    except Exception as exc:
+        logger.warning(f"Notification history cleanup failed channel={channel}: {exc}")
+
+
 def _notification_record(raw: Any, channel: str) -> dict[str, Any]:
     """Normalize legacy tuple records and v2 object records."""
     if isinstance(raw, dict):
@@ -331,6 +440,10 @@ def _notification_record(raw: Any, channel: str) -> dict[str, Any]:
             "session_id": str(raw.get("session_id") or ""),
             "session_name": str(raw.get("session_name") or ""),
             "source_client": str(raw.get("source_client") or ""),
+            "source_event_id": str(raw.get("source_event_id") or ""),
+            "source_message_id": str(raw.get("source_message_id") or ""),
+            "content_kind": str(raw.get("content_kind") or ""),
+            "stop_reason": str(raw.get("stop_reason") or ""),
         }
     if not isinstance(raw, (list, tuple)) or len(raw) < 2:
         raise ValueError("Unsupported notification record")
@@ -348,6 +461,10 @@ def _notification_record(raw: Any, channel: str) -> dict[str, Any]:
         "session_id": "",
         "session_name": "",
         "source_client": "",
+        "source_event_id": "",
+        "source_message_id": "",
+        "content_kind": "",
+        "stop_reason": "",
     }
 
 
@@ -357,6 +474,7 @@ def _public_notification(record: dict[str, Any]) -> dict[str, Any]:
         for key in (
             "schema_version", "id", "client_msg_id", "channel", "message", "icon",
             "timestamp", "server_timestamp", "session_id", "session_name", "source_client",
+            "source_event_id", "source_message_id", "content_kind", "stop_reason",
         )
     }
 
@@ -364,7 +482,9 @@ def _public_notification(record: dict[str, Any]) -> dict[str, Any]:
 def add_notification(message: str, channel: str, icon: str = "info",
                      notif_id: str = "", timestamp: str = "", client_msg_id: str = "",
                      session_id: str = "", session_name: str = "",
-                     source_client: str = "", schema_version: int = 2) -> dict[str, Any]:
+                     source_client: str = "", source_event_id: str = "",
+                     source_message_id: str = "", content_kind: str = "",
+                     stop_reason: str = "", schema_version: int = 2) -> dict[str, Any]:
     import uuid
     event_timestamp = normalize_notification_timestamp(timestamp)
     server_timestamp = datetime_class.now(timezone.utc).isoformat()
@@ -401,6 +521,42 @@ def add_notification(message: str, channel: str, icon: str = "info",
                 "message_id": existing_id,
                 "client_msg_id": client_msg_id,
             }
+    if source_client and str(source_client).strip().lower() == "claude" and (
+        source_event_id or source_message_id
+    ) and session_id:
+        source_key = _source_event_dedupe_key(
+            channel,
+            source_client,
+            session_id,
+            source_message_id,
+            source_event_id,
+            message,
+        )
+        source_record = {
+            "message_id": notif_id,
+            "source_event_id": source_event_id,
+            "source_message_id": source_message_id,
+        }
+        inserted = redis_conn.set(source_key, json.dumps(source_record), nx=True, ex=7 * 86400)
+        if not inserted:
+            existing_raw = redis_conn.get(source_key)
+            try:
+                existing = json.loads(
+                    existing_raw.decode("utf-8") if isinstance(existing_raw, bytes) else str(existing_raw)
+                )
+            except Exception:
+                existing = {}
+            existing_id = str(existing.get("message_id") or notif_id)
+            logger.info(
+                f"Duplicate source event skipped source_message_id={source_message_id[:24]} "
+                f"source_event_id={source_event_id[:24]} channel={channel}"
+            )
+            return {
+                "status": "duplicate",
+                "stored_new": False,
+                "message_id": existing_id,
+                "client_msg_id": client_msg_id,
+            }
     notification = {
         "schema_version": max(2, int(schema_version or 2)),
         "id": notif_id,
@@ -414,20 +570,32 @@ def add_notification(message: str, channel: str, icon: str = "info",
         "session_id": session_id,
         "session_name": session_name,
         "source_client": source_client,
+        "source_event_id": source_event_id,
+        "source_message_id": source_message_id,
+        "content_kind": content_kind,
+        "stop_reason": stop_reason,
     }
     redis_conn.lpush(f"{redis_notifications}:{channel}", json.dumps(notification))
     logger.debug(f"Added notification id={notif_id[:8]} to channel: {channel}")
     # Fire-and-forget UnifiedPush forward in a background thread
     threading.Thread(
         target=send_unifiedpush,
-        args=(channel, message, icon, event_timestamp, notif_id, session_id, session_name, source_client),
+        args=(
+            channel, message, icon, event_timestamp, notif_id, session_id,
+            session_name, source_client, source_event_id, source_message_id,
+            content_kind, stop_reason,
+        ),
         daemon=True,
     ).start()
     # FCM is paused — keep code path for rollback via ENABLE_FCM=1.
     if fcm_enabled and not fcm_paused:
         threading.Thread(
             target=send_fcm_push,
-            args=(channel, message, icon, event_timestamp, notif_id, session_id, session_name, source_client),
+            args=(
+                channel, message, icon, event_timestamp, notif_id, session_id,
+                session_name, source_client, source_event_id, source_message_id,
+                content_kind, stop_reason,
+            ),
             daemon=True,
         ).start()
     return {
@@ -558,6 +726,10 @@ def receive_notification() -> Tuple[Response, int]:
             session_id = data.get("session_id", "")
             session_name = data.get("session_name", "")
             source_client = data.get("source_client", "")
+            source_event_id = data.get("source_event_id", "")
+            source_message_id = data.get("source_message_id", "")
+            content_kind = data.get("content_kind", "")
+            stop_reason = data.get("stop_reason", "")
             schema_version = data.get("schema_version", 1)
             logger.info(
                 f"Received notification from ip {request.remote_addr} "
@@ -575,6 +747,10 @@ def receive_notification() -> Tuple[Response, int]:
                 session_id=session_id,
                 session_name=session_name,
                 source_client=source_client,
+                source_event_id=source_event_id,
+                source_message_id=source_message_id,
+                content_kind=content_kind,
+                stop_reason=stop_reason,
                 schema_version=schema_version,
             )
         except jsonschema.exceptions.ValidationError as e:
@@ -638,6 +814,7 @@ def pull_notifications() -> Tuple[Response, int]:
         authorized = _ssh_signature_authorized(sig)
     if not authorized:
         return jsonify({"error": "Authorization required"}), 401
+    _cleanup_notification_history(channel)
     notification_key = f"{redis_notifications}:{channel}"
     results = []
     for i in range(redis_conn.llen(notification_key)):

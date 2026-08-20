@@ -162,7 +162,14 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
                 item.Message ?? "",
                 string.IsNullOrWhiteSpace(item.Icon) ? "info" : item.Icon,
                 item.Timestamp ?? "",
-                item.ServerTimestamp ?? ""))
+                item.ServerTimestamp ?? "",
+                item.SessionId ?? "",
+                item.SessionName ?? "",
+                item.SourceClient ?? "",
+                item.SourceEventId ?? "",
+                item.SourceMessageId ?? "",
+                item.ContentKind ?? "",
+                item.StopReason ?? ""))
             .ToArray();
         return new RemoteNotificationPullResult(
             notifications.Length == 0 ? "idle" : "ok",
@@ -234,6 +241,27 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
 
         [JsonPropertyName("server_timestamp")]
         public string? ServerTimestamp { get; init; }
+
+        [JsonPropertyName("session_id")]
+        public string? SessionId { get; init; }
+
+        [JsonPropertyName("session_name")]
+        public string? SessionName { get; init; }
+
+        [JsonPropertyName("source_client")]
+        public string? SourceClient { get; init; }
+
+        [JsonPropertyName("source_event_id")]
+        public string? SourceEventId { get; init; }
+
+        [JsonPropertyName("source_message_id")]
+        public string? SourceMessageId { get; init; }
+
+        [JsonPropertyName("content_kind")]
+        public string? ContentKind { get; init; }
+
+        [JsonPropertyName("stop_reason")]
+        public string? StopReason { get; init; }
     }
 }
 

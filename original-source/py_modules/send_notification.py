@@ -13,6 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from py_modules.simple_http_notification_conf import cloud_server_protocol, cloud_server_ip, cloud_server_port
 from py_modules.simple_http_notification_sender import SimpleHttpNotificationSender
 from py_modules.logging_lib import setup_logging
+from py_modules.claude_stop_guard import (
+    claim_stop as claim_claude_stop,
+    commit_claim as commit_claude_stop,
+    inspect_stop as inspect_claude_stop,
+    release_claim as release_claude_stop,
+)
 
 
 CLAUDE_TASK_LABEL = "Claude Task"
@@ -510,10 +516,24 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
     label = label_for_payload(data, client)
     claude_task = label == CLAUDE_TASK_LABEL
 
-    last_msg = data.get("last_assistant_message") or data.get("text") or ""
-    if not isinstance(last_msg, str):
-        last_msg = ""
-    last_msg = last_msg.strip()
+    last_msg = ""
+    if client == "claude":
+        # A Stop hook payload can retain an older assistant sentence after the
+        # transcript has moved on to thinking/tool_use.  The guard places the
+        # accepted transcript text in this private field for the exact event
+        # that was claimed by main().
+        accepted = data.get("_mpt_claude_visible_text")
+        if isinstance(accepted, str):
+            last_msg = accepted.strip()
+        else:
+            snapshot = inspect_claude_stop(data)
+            if snapshot is not None and snapshot.is_visible_completion:
+                last_msg = snapshot.text.strip()
+    if not last_msg:
+        last_msg = data.get("last_assistant_message") or data.get("text") or ""
+        if not isinstance(last_msg, str):
+            last_msg = ""
+        last_msg = last_msg.strip()
     if not last_msg and client == "dsh":
         last_msg = _dsh_last_assistant_message(data.get("transcript_path", ""))
     if not last_msg and client in ("cursor", "claude"):
@@ -638,6 +658,7 @@ def main():
     data = {}
     raw = ""
     client = args.client
+    claude_claim = None
 
     if args.stdin:
         try:
@@ -653,6 +674,15 @@ def main():
 
         if _is_cursor_payload(data):
             client = "cursor"
+
+        if hook == 'stop' and client == "claude":
+            claude_claim = claim_claude_stop(data)
+            if claude_claim is None:
+                # Intermediate tool turns, thinking-only turns, incomplete
+                # transcript lines, and repeated event identities stay out of
+                # the notification stream.
+                return
+            data["_mpt_claude_visible_text"] = claude_claim.snapshot.text
 
         if hook == 'stop':
             message = format_stop_message(data, client)
@@ -705,23 +735,44 @@ def main():
         icon=icon,
     )
     notif_id = args.notif_id or client_msg_id
+    source_event_id = ""
+    source_message_id = ""
+    content_kind = ""
+    stop_reason = ""
+    if claude_claim is not None:
+        source_event_id = claude_claim.snapshot.event_uuid
+        source_message_id = claude_claim.snapshot.message_id
+        content_kind = "text"
+        stop_reason = claude_claim.snapshot.stop_reason
 
     logger = setup_logging()
     sender = SimpleHttpNotificationSender(cloud_server_protocol, cloud_server_ip, cloud_server_port, logger)
     http_timeout = float(os.environ.get("ANDROIDTOOLS_NOTIFY_HTTP_TIMEOUT", "10"))
-    sender.send(
-        args.channel,
-        message,
-        icon,
-        notif_id=notif_id,
-        client_msg_id=client_msg_id,
-        timestamp=timestamp,
-        session_id=session_id,
-        session_name=session_name,
-        source_client=client,
-        schema_version=2,
-        timeout=http_timeout,
-    )
+    try:
+        sender.send(
+            args.channel,
+            message,
+            icon,
+            notif_id=notif_id,
+            client_msg_id=client_msg_id,
+            timestamp=timestamp,
+            session_id=session_id,
+            session_name=session_name,
+            source_client=client,
+            source_event_id=source_event_id,
+            source_message_id=source_message_id,
+            content_kind=content_kind,
+            stop_reason=stop_reason,
+            schema_version=2,
+            timeout=http_timeout,
+        )
+    except Exception:
+        if claude_claim is not None:
+            release_claude_stop(claude_claim)
+        raise
+    else:
+        if claude_claim is not None:
+            commit_claude_stop(claude_claim)
     if debug_log:
         try:
             with open(debug_log, 'a') as f:
@@ -742,6 +793,10 @@ def main():
             session_id=session_id,
             session_name=session_name,
             source_client=client,
+            source_event_id=source_event_id,
+            source_message_id=source_message_id,
+            content_kind=content_kind,
+            stop_reason=stop_reason,
         )
         if debug_log:
             with open(debug_log, 'a') as f:
