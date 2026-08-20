@@ -442,13 +442,26 @@ def _starts_with_synthetic_marker(text: str) -> bool:
     return had_reminder and rest == ""
 
 
+def _has_synthetic_claude_origin(entry: dict) -> bool:
+    if entry.get("isMeta") is True or str(entry.get("isMeta") or "").lower() in ("true", "1"):
+        return True
+    for origin_key in ("origin", "user_origin"):
+        origin = entry.get(origin_key)
+        if isinstance(origin, dict):
+            kind = str(origin.get("kind") or "").strip().lower()
+            if kind in {"task-notification", "system", "monitor", "background", "auto"}:
+                return True
+    prompt_source = str(entry.get("promptSource") or entry.get("prompt_source") or "").strip().lower()
+    return prompt_source in {"system", "task-notification", "monitor", "background", "auto"}
+
+
 def is_claude_task_notification(data: dict) -> bool:
     """True when the Claude hook fired for a system-injected entry:
     task-notification / isMeta / continuation / interrupt / stop-hook
     feedback / command envelope / reminder-only. Structured transcript
     flags win; text markers are prefix-matched. Real user prompts never
     match, even when they quote or mention the markers."""
-    if data.get("isMeta") is True or str(data.get("isMeta") or "").lower() in ("true", "1"):
+    if _has_synthetic_claude_origin(data):
         return True
     entry_type = str(data.get("type") or "").strip()
     if entry_type and entry_type not in ("user", "assistant"):
@@ -463,7 +476,7 @@ def is_claude_task_notification(data: dict) -> bool:
         return True
     entry = _claude_last_user_entry(data)
     if entry is not None:
-        if entry.get("isMeta") is True or str(entry.get("isMeta") or "").lower() in ("true", "1"):
+        if _has_synthetic_claude_origin(entry):
             return True
         entry_text = _claude_entry_text(entry)
         if entry_text and _starts_with_synthetic_marker(entry_text):
@@ -682,11 +695,11 @@ def main():
                 # transcript lines, and repeated event identities stay out of
                 # the notification stream.
                 return
-            if not is_claude_task_notification(data):
-                # Claude emits a Stop hook after every ordinary assistant turn.
-                # Those long background-agent replies are transcript content,
-                # not remote task notifications. Keep synthetic task turns on
-                # the dedicated Claude Task route and drop ordinary replies.
+            if is_claude_task_notification(data):
+                # Claude emits Stop hooks for automatic turns as well as for
+                # real human conversations. System/task-notification turns
+                # are background progress and must stay out of the stream;
+                # human-origin turns continue through the normal route.
                 release_claude_stop(claude_claim)
                 return
             data["_mpt_claude_visible_text"] = claude_claim.snapshot.text

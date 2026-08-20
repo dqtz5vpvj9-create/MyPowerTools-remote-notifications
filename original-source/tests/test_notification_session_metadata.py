@@ -71,6 +71,13 @@ def test_server_source_keeps_legacy_records_readable():
     assert "results.append(_public_notification(record))" in source
 
 
+def test_server_source_purges_legacy_claude_automatic_records():
+    source = (ROOT / "py_modules" / "simple_http_notification_server.py").read_text(encoding="utf-8")
+    assert "def _legacy_claude_automatic_record" in source
+    assert "_purge_legacy_claude_automatic(raw_records)" in source
+    assert '"Claude is waiting for your input"' in source
+
+
 def test_dsh_session_name_from_projection_cache(tmp_path, monkeypatch):
     dsh_home = tmp_path / "dsh-home"
     storage = dsh_home / "storages"
@@ -87,6 +94,48 @@ def test_dsh_session_name_from_projection_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("DSH_HOME", str(dsh_home))
     module = load_send_module()
     assert module._dsh_session_name("session-abc") == "DSH 会话标题"
+
+
+def test_claude_classifier_keeps_human_typed_and_queued_prompts(tmp_path):
+    module = load_send_module()
+    for prompt_source, text in (("typed", "请回答这个问题"), ("queued", "继续刚才的人工问题")):
+        transcript = tmp_path / f"human-{prompt_source}.jsonl"
+        transcript.write_text("\n".join([
+            json.dumps({
+                "type": "user",
+                "userType": "external",
+                "promptSource": prompt_source,
+                "origin": {"kind": "human"},
+                "message": {"role": "user", "content": text},
+            }),
+            json.dumps({
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "人工回复"}]},
+            }),
+        ]), encoding="utf-8")
+        payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
+        assert module.is_claude_task_notification(payload) is False
+
+
+def test_claude_classifier_drops_meta_task_notification(tmp_path):
+    module = load_send_module()
+    transcript = tmp_path / "automatic.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({
+            "type": "user",
+            "userType": "external",
+            "isMeta": True,
+            "promptSource": "system",
+            "origin": {"kind": "task-notification"},
+            "message": {"role": "user", "content": "<task-notification> background work completed"},
+        }),
+        json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "自动进度回复"}]},
+        }),
+    ]), encoding="utf-8")
+    payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
+    assert module.is_claude_task_notification(payload) is True
 
 
 def test_dsh_stop_message_uses_transcript(tmp_path, monkeypatch):
