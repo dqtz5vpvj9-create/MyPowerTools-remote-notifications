@@ -76,6 +76,7 @@ Console.WriteLine($"RemoteNotifications.Service starting pid={pid} endpoint={soc
 
 var state = new WorkerState();
 var pollGate = new object();
+var startupBackfillPending = true;
 var pipeCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
 _ = Task.Run(() => socketPath is null
     ? ServeControlPipe(pipeName, state, pollGate, desktopNotifications, pipeCts.Token)
@@ -93,7 +94,8 @@ try
         {
             lock (pollGate)
             {
-                RunOnePollCycle(state, desktopNotifications);
+                RunOnePollCycle(state, desktopNotifications, startupBackfillPending);
+                startupBackfillPending = false;
             }
         }
         catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
@@ -138,7 +140,10 @@ return 0;
 // Single poll cycle. Mirrors RemoteNotificationBackgroundReceiver.PollAsync plus the
 // Surface banner dispatch, consolidated into one owned path.
 // ---------------------------------------------------------------------------
-static void RunOnePollCycle(WorkerState state, INotificationService? desktopNotifications)
+static void RunOnePollCycle(
+    WorkerState state,
+    INotificationService? desktopNotifications,
+    bool startupBackfill = false)
 {
     var settingsStore = new RemoteNotificationSettingsStore();
     var settings = settingsStore.Load();
@@ -148,7 +153,10 @@ static void RunOnePollCycle(WorkerState state, INotificationService? desktopNoti
     var poller = new RemoteNotificationHttpPoller(settings);
 
     var snapshot = store.Load();
-    var waterline = ResolveWaterline(snapshot.MessagesOldestFirst);
+    // A cleanup migration can leave a short local tail while the server still
+    // has valid human records older than that tail. Pull the complete retained
+    // server window once per worker start so those records can be rebuilt.
+    var waterline = startupBackfill ? "" : ResolveWaterline(snapshot.MessagesOldestFirst);
     var seen = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
     foreach (var message in snapshot.MessagesOldestFirst)
     {
@@ -156,7 +164,12 @@ static void RunOnePollCycle(WorkerState state, INotificationService? desktopNoti
         seen.TryAccept(RemoteNotificationsLegacyStore.FallbackId(message));
     }
 
-    var pull = poller.PullAsync(waterline, CancellationToken.None).GetAwaiter().GetResult();
+    var pull = poller.PullAsync(
+        waterline,
+        CancellationToken.None,
+        startupBackfill ? RemoteNotificationsLegacyStore.MaximumMessages : null)
+        .GetAwaiter()
+        .GetResult();
     var sane = pull.Notifications
         .Where(IsSane)
         .OrderBy(NotificationTime)
@@ -209,7 +222,11 @@ static void RunOnePollCycle(WorkerState state, INotificationService? desktopNoti
     }
     store.SaveKnownLabels(labels);
 
-    var shown = DispatchBanners(accepted, settings.KeepWindowsBanners, desktopNotifications);
+    // Backfill is historical reconstruction. Persist it without replaying
+    // hundreds of old Windows banners after every worker restart.
+    var shown = startupBackfill
+        ? 0
+        : DispatchBanners(accepted, settings.KeepWindowsBanners, desktopNotifications);
     state.RecordPoll(pull.State, pull.Error, pull.Notifications.Count, accepted.Count, shown);
 }
 

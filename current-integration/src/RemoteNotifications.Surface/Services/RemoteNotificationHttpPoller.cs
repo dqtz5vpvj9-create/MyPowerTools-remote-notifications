@@ -71,10 +71,18 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
         string since,
         CancellationToken cancellationToken = default)
     {
+        return await PullAsync(since, cancellationToken, limit: null).ConfigureAwait(false);
+    }
+
+    public async Task<RemoteNotificationPullResult> PullAsync(
+        string since,
+        CancellationToken cancellationToken,
+        int? limit)
+    {
         try
         {
             var signature = RemoteNotificationSshSigner.SignHandshake(_privateKeyPath);
-            var requestUri = BuildPullUri(signature, since ?? "");
+            var requestUri = BuildPullUri(signature, since ?? "", limit ?? PullLimit);
             string lastError = "Connection failed";
             for (var attempt = 0; attempt < MaximumAttempts; attempt++)
             {
@@ -177,13 +185,13 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
             "");
     }
 
-    private Uri BuildPullUri(string signature, string since)
+    private Uri BuildPullUri(string signature, string since, int limit)
     {
         var parameters = new List<KeyValuePair<string, string>>
         {
             new("channel", _channel),
             new("sig", signature),
-            new("limit", PullLimit.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            new("limit", Math.Clamp(limit, 1, 2000).ToString(System.Globalization.CultureInfo.InvariantCulture))
         };
         if (!string.IsNullOrWhiteSpace(since))
         {
