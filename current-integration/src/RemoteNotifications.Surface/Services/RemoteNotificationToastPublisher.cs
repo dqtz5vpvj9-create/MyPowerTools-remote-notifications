@@ -60,6 +60,13 @@ public sealed class RemoteNotificationNoopToastPublisher : IRemoteNotificationTo
 
 public sealed class RemoteNotificationWindowsToastPublisher : IRemoteNotificationToastPublisher
 {
+    /** Must match the [label] used by the Python sender for Claude Stops
+     *  triggered by <task-notification> / isMeta / other synthetic user
+     *  injections. Toast display for this label is intentionally suppressed
+     *  — these events populate the Claude Task page in the inbox, but
+     *  do not raise a Windows toast because they arrive too frequently. */
+    public const string ClaudeTaskLabel = "Claude Task";
+
     private readonly IRemoteNotificationToastPlatform _platform;
 
     public RemoteNotificationWindowsToastPublisher(IRemoteNotificationToastPlatform? platform = null)
@@ -74,6 +81,10 @@ public sealed class RemoteNotificationWindowsToastPublisher : IRemoteNotificatio
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (IsClaudeTaskNotification(notification))
+        {
+            return Task.FromResult(new RemoteNotificationToastPublishResult(false, "silent-claude-task"));
+        }
         var envelope = BuildEnvelope(notification, messageId, persistent);
         try
         {
@@ -83,6 +94,13 @@ public sealed class RemoteNotificationWindowsToastPublisher : IRemoteNotificatio
         {
             return Task.FromResult(new RemoteNotificationToastPublishResult(false, "error", exception.Message));
         }
+    }
+
+    public static bool IsClaudeTaskNotification(RemoteNotificationRecord notification)
+    {
+        var stripped = RemoteNotificationsLegacyStore.StripLeadingQuotedRequest(notification.Message ?? "");
+        var label = RemoteNotificationsLegacyStore.ExtractLabel(stripped);
+        return string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal);
     }
 
     public static RemoteNotificationToastEnvelope BuildEnvelope(

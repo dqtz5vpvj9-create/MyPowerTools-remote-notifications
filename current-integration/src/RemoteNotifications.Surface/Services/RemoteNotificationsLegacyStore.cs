@@ -99,9 +99,60 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 {
     public const string DefaultChannel = "default";
     public const string FilterAll = "__all__";
+    public const string ClaudeTaskLabel = "Claude Task";
     public const int MaximumMessages = 500;
     public const int MaximumRecentHashes = 200;
     public const int MaximumSeenMessageIds = 5000;
+
+    /** Fingerprints of a Claude Stop notification whose trigger was an
+     *  auto-injected user turn (task-notification / isMeta / other
+     *  synthetic wrapper). Any historical stored message containing one of
+     *  these gets its [label] rewritten to [Claude Task] on load, so
+     *  legacy items that predate the sender-side label routing move off
+     *  the per-project chip and into the Claude Task page. Idempotent —
+     *  items already labeled [Claude Task] are left alone. */
+    private static readonly string[] ClaudeTaskFingerprints =
+    [
+        "<task-notification>",
+        "Your previous response had no visible output",
+        "<command-message>",
+        "<command-name>",
+        "<local-command-",
+        "Stop hook feedback:",
+        "[Request interrupted",
+        "This session is being continued",
+    ];
+
+    internal static RemoteNotificationRecord RewriteAsClaudeTaskIfHistoricalTaskTriggered(
+        RemoteNotificationRecord message)
+    {
+        var body = message.Message ?? "";
+        var stripped = StripLeadingQuotedRequest(body);
+        var existingLabel = ExtractLabel(stripped);
+        if (string.Equals(existingLabel, ClaudeTaskLabel, StringComparison.Ordinal))
+        {
+            return message;
+        }
+        if (!ClaudeTaskFingerprints.Any(fp => body.Contains(fp, StringComparison.Ordinal)))
+        {
+            return message;
+        }
+        var relabelled = ReplaceLeadingLabel(stripped, ClaudeTaskLabel);
+        return message with { Message = relabelled };
+    }
+
+    private static string ReplaceLeadingLabel(string body, string newLabel)
+    {
+        if (body.StartsWith("[", StringComparison.Ordinal))
+        {
+            var close = body.IndexOf(']');
+            if (close > 0)
+            {
+                return $"[{newLabel}]{body[(close + 1)..]}";
+            }
+        }
+        return $"[{newLabel}] {body}";
+    }
 
     private const string RegistryPath = @"Software\AndroidTools\Page1";
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -471,6 +522,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     {
         var messages = state.Messages
             .Where(message => !string.IsNullOrWhiteSpace(message.Message))
+            .Select(RewriteAsClaudeTaskIfHistoricalTaskTriggered)
             .TakeLast(MaximumMessages)
             .ToArray();
         var labels = state.KnownLabels

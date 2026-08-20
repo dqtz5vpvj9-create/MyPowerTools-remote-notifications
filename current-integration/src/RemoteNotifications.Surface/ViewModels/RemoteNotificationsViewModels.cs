@@ -432,7 +432,11 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private void RebuildChips()
     {
         Chips.Clear();
-        if (KnownLabels.Count == 0)
+        // The Claude Task label has its own dedicated page — never a chip.
+        var chipLabels = KnownLabels
+            .Where(label => !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal))
+            .ToArray();
+        if (chipLabels.Length == 0)
         {
             OnPropertyChanged(nameof(HasLabels));
             OnPropertyChanged(nameof(ShowInboxLabels));
@@ -445,7 +449,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
             _filterLabel is null,
             false,
             SelectFilterAsync));
-        foreach (var label in KnownLabels)
+        foreach (var label in chipLabels)
         {
             Chips.Add(new RemoteNotificationLabelChipViewModel(
                 label,

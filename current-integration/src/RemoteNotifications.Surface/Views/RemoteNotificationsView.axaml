@@ -171,6 +171,11 @@
                           ToolTip.Tip="Remove stored notifications"
                           IsVisible="{Binding IsInboxVisible}"
                           VerticalAlignment="Center" />
+      <controls:MptButton Content="Claude Task"
+                          Command="{Binding ShowClaudeTaskCommand}"
+                          ToolTip.Tip="Auto-triggered Stops from Claude (task-notification, continue nudges)"
+                          IsVisible="{Binding IsInboxVisible}"
+                          VerticalAlignment="Center" />
       <Grid>
         <controls:MptButton Content="Settings"
                             Command="{Binding ShowSettingsCommand}"
@@ -179,6 +184,10 @@
         <controls:MptButton Content="Back to inbox"
                             Command="{Binding ShowInboxCommand}"
                             IsVisible="{Binding IsSettingsVisible}"
+                            VerticalAlignment="Center" />
+        <controls:MptButton Content="Back to inbox"
+                            Command="{Binding ShowInboxCommand}"
+                            IsVisible="{Binding IsClaudeTaskVisible}"
                             VerticalAlignment="Center" />
       </Grid>
       </StackPanel>
