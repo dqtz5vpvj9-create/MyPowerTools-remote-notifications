@@ -106,11 +106,12 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     /** Fingerprints of a Claude Stop notification whose trigger was an
      *  auto-injected user turn (task-notification / isMeta / other
-     *  synthetic wrapper). Any historical stored message containing one of
-     *  these gets its [label] rewritten to [Claude Task] on load, so
-     *  legacy items that predate the sender-side label routing move off
-     *  the per-project chip and into the Claude Task page. Idempotent —
-     *  items already labeled [Claude Task] are left alone. */
+     *  synthetic wrapper). Matching runs on the body AFTER the leading
+     *  quoted user request, and only for short system-shaped payloads — a
+     *  long user report may legitimately mention these words in prose and
+     *  must never be routed to the Claude Task page. Legacy items that
+     *  predate the sender-side label routing move off the per-project chip;
+     *  items the v1 matcher wrongly relabeled are repaired back. */
     private static readonly string[] ClaudeTaskFingerprints =
     [
         "<task-notification>",
@@ -131,14 +132,44 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         var existingLabel = ExtractLabel(stripped);
         if (string.Equals(existingLabel, ClaudeTaskLabel, StringComparison.Ordinal))
         {
+            if (!IsTaskTriggerBody(stripped))
+            {
+                // v1 substring matcher routed a long real payload here.
+                // Drop the synthetic label so the message is visible again.
+                return message with { Message = RemoveLeadingLabel(stripped) };
+            }
             return message;
         }
-        if (!ClaudeTaskFingerprints.Any(fp => body.Contains(fp, StringComparison.Ordinal)))
+        if (!IsTaskTriggerBody(stripped))
         {
             return message;
         }
         var relabelled = ReplaceLeadingLabel(stripped, ClaudeTaskLabel);
         return message with { Message = relabelled };
+    }
+
+    /** Synthetic Claude Stops are short system-injected tips. A long payload
+     *  that merely mentions a marker is a real user/assistant message. */
+    private static bool IsTaskTriggerBody(string body)
+    {
+        if (body.Length > 2000)
+        {
+            return false;
+        }
+        return ClaudeTaskFingerprints.Any(fp => body.Contains(fp, StringComparison.Ordinal));
+    }
+
+    private static string RemoveLeadingLabel(string body)
+    {
+        if (body.StartsWith("[", StringComparison.Ordinal))
+        {
+            var close = body.IndexOf(']');
+            if (close > 0)
+            {
+                return body[(close + 1)..].TrimStart();
+            }
+        }
+        return body;
     }
 
     private static string ReplaceLeadingLabel(string body, string newLabel)
