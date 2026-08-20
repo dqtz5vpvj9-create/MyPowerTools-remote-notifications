@@ -134,7 +134,13 @@ def test_claude_classifier_drops_meta_task_notification(tmp_path):
             "message": {"content": [{"type": "text", "text": "自动进度回复"}]},
         }),
     ]) + "\n", encoding="utf-8")
-    payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
+    payload = {
+        "transcript_path": str(transcript),
+        "hook_event_name": "Stop",
+        "isMeta": True,
+        "promptSource": "system",
+        "origin": {"kind": "task-notification"},
+    }
     assert module.is_claude_task_notification(payload) is True
 
 

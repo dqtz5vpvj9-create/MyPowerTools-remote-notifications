@@ -396,19 +396,6 @@ def _tail_transcript_entries(transcript_path: str, max_lines: int = 512) -> list
     return entries
 
 
-def _claude_last_user_entry(data: dict) -> dict | None:
-    """Read the latest declared user record when the hook has no event UUID.
-
-    Production Stop hooks carry an accepted event UUID and use the anchored
-    parent-chain path. This compatibility path still relies on Claude's
-    explicit metadata; it never examines the record text.
-    """
-    for entry in reversed(_tail_transcript_entries(data.get("transcript_path") or "")):
-        if entry.get("type") == "user":
-            return entry
-    return None
-
-
 def _claude_transcript_index(data: dict, max_lines: int = 512) -> dict[str, dict]:
     """Index the recent Claude JSONL entries by their explicit UUID.
 
@@ -547,17 +534,7 @@ def is_claude_task_notification(data: dict, snapshot=None) -> bool:
         return True
     if _claude_stop_has_synthetic_ancestor(data, snapshot):
         return True
-    event_uuid = str(
-        getattr(snapshot, "event_uuid", "")
-        or data.get("_mpt_claude_event_uuid")
-        or data.get("event_uuid")
-        or data.get("eventUuid")
-        or ""
-    ).strip()
-    if event_uuid:
-        return False
-    entry = _claude_last_user_entry(data)
-    return entry is not None and _has_synthetic_claude_origin(entry)
+    return False
 
 
 def label_for_payload(data: dict, client: str) -> str:
