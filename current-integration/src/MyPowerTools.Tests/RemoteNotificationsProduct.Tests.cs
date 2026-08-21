@@ -93,6 +93,35 @@ public sealed class RemoteNotificationsProductTests
     }
 
     [Fact]
+    public void Historical_claude_task_event_identity_is_filtered_without_text_matching()
+    {
+        var legacy = new RemoteNotificationRecord(
+            "legacy",
+            "default",
+            "[autodroid-52] A07 仍在，观察者就位。",
+            "claude",
+            "2026-08-21T01:48:09Z",
+            SourceClient: "claude",
+            SourceEventId: "038a6a87-8162-4f66-96d7-7b4d46ebf12d",
+            ContentKind: "text");
+        var human = legacy with
+        {
+            Id = "human",
+            SourceEventId = "human-event",
+            Message = "> A07 结果怎么样？\n\n[autodroid-52] 已完成。"
+        };
+
+        Assert.True(RemoteNotificationsLegacyStore.IsHistoricalClaudeInternalEvent(legacy));
+        Assert.False(RemoteNotificationsLegacyStore.IsHistoricalClaudeInternalEvent(human));
+        Assert.DoesNotContain(
+            RemoteNotificationsLegacyStore.CleanupClaudeStopNoise([legacy, human]),
+            message => message.Id == "legacy");
+        Assert.Contains(
+            RemoteNotificationsLegacyStore.CleanupClaudeStopNoise([legacy, human]),
+            message => message.Id == "human");
+    }
+
+    [Fact]
     public async Task Task_completed_still_publishes_one_banner_without_creating_a_card()
     {
         var reply = new RemoteNotificationRecord(

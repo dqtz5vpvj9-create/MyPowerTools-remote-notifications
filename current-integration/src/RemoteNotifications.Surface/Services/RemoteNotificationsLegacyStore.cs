@@ -111,6 +111,21 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     public const int MaximumSeenMessageIds = 5000;
     public const int ClaudeDuplicateWindowMinutes = 15;
 
+    // Exact source identities confirmed from Claude's explicit task-notification
+    // ancestry.  This one-time compatibility set repairs records written before
+    // the sender carried content_kind=agent_internal.
+    private static readonly IReadOnlySet<string> HistoricalClaudeInternalEventIds =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "d814dbaf-30a9-4fb4-a009-c0b178a39b39",
+            "6c132e39-35af-4b8e-b5b1-269f78853985",
+            "d3ff8b80-ad87-4dee-bc19-0429a8e15912",
+            "6e2820e0-2a3e-48f3-a489-8b1c25a9d875",
+            "8d2da7e9-e2e0-4308-a99e-9d98e1c3abd2",
+            "038a6a87-8162-4f66-96d7-7b4d46ebf12d",
+            "7235671c-a2e9-4716-8806-3938c401c2a8",
+        };
+
     private const string RegistryPath = @"Software\AndroidTools\Page1";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -569,7 +584,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     /// <summary>
     /// Removes records carrying the sender's explicit agent-internal content
-    /// kind while keeping human-origin records unchanged.
+    /// kind, plus the exact pre-metadata event identities above.
     /// </summary>
     public static IReadOnlyList<RemoteNotificationRecord> CleanupClaudeStopNoise(
         IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
@@ -577,7 +592,8 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         var cleaned = new List<RemoteNotificationRecord>(messagesOldestFirst.Count);
         foreach (var message in CollapseClaudeStopDuplicates(messagesOldestFirst))
         {
-            if (IsInternalAgentCommunication(message))
+            if (IsInternalAgentCommunication(message) ||
+                IsHistoricalClaudeInternalEvent(message))
             {
                 continue;
             }
@@ -688,6 +704,12 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         var kind = message.ContentKind?.Trim() ?? "";
         return kind.Equals("agent_internal", StringComparison.OrdinalIgnoreCase) ||
                kind.Equals("claude_agent_internal", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsHistoricalClaudeInternalEvent(RemoteNotificationRecord message)
+    {
+        return string.Equals(message.SourceClient?.Trim(), "claude", StringComparison.OrdinalIgnoreCase) &&
+               HistoricalClaudeInternalEventIds.Contains(message.SourceEventId?.Trim() ?? "");
     }
 
     private static string AppendTaskCompleted(string message)
