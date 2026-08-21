@@ -144,6 +144,16 @@ def test_claude_classifier_drops_meta_task_notification(tmp_path):
     assert module.is_claude_task_notification(payload) is True
 
 
+def test_automatic_origin_without_explicit_internal_kind_remains_deliverable():
+    module = load_send_module()
+
+    assert module._explicit_agent_internal_kind("") is False
+    assert module._explicit_agent_internal_kind("text") is False
+    assert module._explicit_agent_internal_kind("task_result") is False
+    assert module._explicit_agent_internal_kind("agent_internal") is True
+    assert module._explicit_agent_internal_kind("claude_agent_internal") is True
+
+
 def test_claude_origin_comes_from_parent_uuid_metadata(tmp_path, monkeypatch):
     module = load_send_module()
     monkeypatch.setenv("ANDROIDTOOLS_CLAUDE_STOP_STATE", str(tmp_path / "stop-state.json"))

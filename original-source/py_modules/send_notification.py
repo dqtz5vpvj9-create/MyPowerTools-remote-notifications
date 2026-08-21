@@ -22,6 +22,10 @@ from py_modules.claude_stop_guard import (
 
 
 CLAUDE_TASK_LABEL = "Claude Task"
+_EXPLICIT_AGENT_INTERNAL_KINDS = frozenset({
+    "agent_internal",
+    "claude_agent_internal",
+})
 
 
 def _canonical_json(data):
@@ -553,7 +557,13 @@ def _has_synthetic_claude_origin(entry: dict) -> bool:
 
 
 def is_claude_task_notification(data: dict, snapshot=None) -> bool:
-    """True only when Claude declares an automatic/system-origin turn."""
+    """Classify the provider-declared origin of a Claude turn.
+
+    This is origin metadata only. A task-notification ancestry does not decide
+    message visibility: an unmarked terminal response remains eligible for
+    delivery. Explicit ``content_kind=agent_internal`` is the sender-side
+    suppression signal.
+    """
     if _has_synthetic_claude_origin(data):
         return True
     entry_type = str(data.get("type") or "").strip()
@@ -574,6 +584,10 @@ def label_for_payload(data: dict, client: str) -> str:
         roots = data.get("workspace_roots") or []
         cwd = roots[0] if roots else ""
     return session_name or os.path.basename(str(cwd).rstrip("\\/")) or client_name(client)
+
+
+def _explicit_agent_internal_kind(content_kind: object) -> bool:
+    return str(content_kind or "").strip().lower() in _EXPLICIT_AGENT_INTERNAL_KINDS
 
 
 def _dsh_last_user_message(transcript_path: str) -> str:
@@ -746,6 +760,8 @@ def main():
     parser.add_argument('--stdin', action='store_true', help='Read message from stdin JSON from an agent hook')
     parser.add_argument('--hook', default=None,
                         help='Hook type for smarter formatting')
+    parser.add_argument('--content-kind', default=None,
+                        help='Explicit content kind; agent_internal suppresses delivery')
     parser.add_argument('--timestamp', default=None,
                         help='Canonical notification event timestamp; async hooks pass queue time')
     parser.add_argument('--client-msg-id', default=None)
@@ -781,14 +797,15 @@ def main():
                 # the notification stream.
                 return
             data["_mpt_claude_event_uuid"] = claude_claim.snapshot.event_uuid
-            if is_claude_task_notification(data, claude_claim.snapshot):
-                # Claude emits Stop hooks for automatic turns as well as for
-                # real human conversations. System/task-notification turns
-                # are background progress and must stay out of the stream;
-                # human-origin turns continue through the normal route.
+            explicit_kind = args.content_kind or data.get("content_kind")
+            if _explicit_agent_internal_kind(explicit_kind):
                 release_claude_stop(claude_claim)
                 return
             data["_mpt_claude_visible_text"] = claude_claim.snapshot.text
+
+        explicit_kind = args.content_kind or data.get("content_kind")
+        if _explicit_agent_internal_kind(explicit_kind) and claude_claim is None:
+            return
 
         if hook == 'stop':
             message = format_stop_message(data, client)
@@ -802,6 +819,8 @@ def main():
             message = data.get('message', data.get('title', str(data)))
 
     elif args.message:
+        if _explicit_agent_internal_kind(args.content_kind):
+            return
         message = args.message
     else:
         parser.error('message is required unless --stdin is used')
@@ -844,12 +863,13 @@ def main():
     notif_id = args.notif_id or client_msg_id
     source_event_id = ""
     source_message_id = ""
-    content_kind = ""
+    content_kind = str(args.content_kind or data.get("content_kind") or "").strip()
     stop_reason = ""
     if claude_claim is not None:
         source_event_id = claude_claim.snapshot.event_uuid
         source_message_id = claude_claim.snapshot.message_id
-        content_kind = "text"
+        if not content_kind:
+            content_kind = "text"
         stop_reason = claude_claim.snapshot.stop_reason
 
     logger = setup_logging()
