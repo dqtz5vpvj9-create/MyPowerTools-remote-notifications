@@ -367,6 +367,30 @@ def _claude_entry_text(entry: dict) -> str:
     return ""
 
 
+def _claude_user_entry_is_prompt(entry: dict) -> bool:
+    """Distinguish a user prompt from Claude's tool-result carrier row.
+
+    Claude stores tool results under ``type=user`` too. AgentsView treats
+    those rows as transport records, so ancestry must continue through them
+    until it reaches a real text/input prompt or an explicit system row.
+    The decision uses only content block types, never the block text.
+    """
+    message = entry.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, list):
+            return any(
+                isinstance(block, dict)
+                and str(block.get("type") or "").strip().lower() in ("text", "input_text")
+                for block in content
+            ) or any(isinstance(block, str) for block in content)
+        if isinstance(content, str):
+            return True
+        if isinstance(message.get("text"), str):
+            return True
+    return any(isinstance(entry.get(key), str) for key in ("text", "body"))
+
+
 def _tail_transcript_entries(transcript_path: str, max_lines: int = 512) -> list:
     """Last JSONL entries of a Claude transcript, read from the tail so a
     Stop hook never pays for a full re-read of a long session."""
@@ -441,7 +465,10 @@ def _claude_ancestry_result(entries: dict[str, dict], event_uuid: str) -> tuple[
             return False, False, ""
         if _is_explicit_claude_automatic_entry(parent):
             return True, True, ""
-        if str(parent.get("type") or "").strip().lower() == "user":
+        if (
+            str(parent.get("type") or "").strip().lower() == "user"
+            and _claude_user_entry_is_prompt(parent)
+        ):
             return True, False, _claude_entry_text(parent).strip()
         current = parent
     return True, False, ""

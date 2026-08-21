@@ -204,6 +204,43 @@ def test_claude_text_cannot_classify_an_unmarked_human_turn(tmp_path, monkeypatc
     assert module.is_claude_task_notification(payload, snapshot) is False
 
 
+def test_claude_ancestry_skips_tool_result_user_rows(tmp_path, monkeypatch):
+    module = load_send_module()
+    monkeypatch.setenv("ANDROIDTOOLS_CLAUDE_STOP_STATE", str(tmp_path / "stop-state.json"))
+    transcript = tmp_path / "tool-result-chain.jsonl"
+    transcript.write_text("\n".join([
+        json.dumps({
+            "type": "system", "subtype": "scheduled_task_fire", "uuid": "s0",
+        }),
+        json.dumps({
+            "type": "user", "uuid": "u0", "parentUuid": "s0",
+            "promptSource": "system", "origin": {"kind": "task-notification"},
+            "message": {"role": "user", "content": "自动入口"},
+        }),
+        json.dumps({
+            "type": "assistant", "uuid": "a0", "parentUuid": "u0",
+            "message": {"content": [{"type": "text", "text": "中间回复"}]},
+        }),
+        json.dumps({
+            "type": "user", "uuid": "r0", "parentUuid": "a0",
+            "message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "toolu_1", "content": "结果"
+            }]},
+        }),
+        json.dumps({
+            "type": "assistant", "uuid": "a1", "parentUuid": "r0",
+            "message": {"id": "m1", "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": "内部巡查结果"}]},
+        }),
+    ]) + "\n", encoding="utf-8")
+    payload = {"transcript_path": str(transcript), "hook_event_name": "Stop"}
+    snapshot = module.inspect_claude_stop(payload)
+    assert snapshot is not None
+    payload["_mpt_claude_event_uuid"] = snapshot.event_uuid
+    assert module._claude_stop_has_synthetic_ancestor(payload, snapshot) is True
+    assert module.is_claude_task_notification(payload, snapshot) is True
+
+
 def test_dsh_stop_message_uses_transcript(tmp_path, monkeypatch):
     dsh_home = tmp_path / "dsh-home"
     dsh_home.mkdir(parents=True)
