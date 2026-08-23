@@ -31,8 +31,9 @@ The Python hook path has an independent health monitor:
   and `requeue-failed` commands.
 - `original-source/py_modules/notification_health_monitor.py` checks queue age,
   worker liveness, failed items, hook completion, and disk pressure.
-- The monitor sends alerts through direct HTTP and direct FCM, outside the
-  event queue and transcript formatter.
+- Health records use `content_kind=system_health`: they are stored through
+  direct HTTP for the APP/desktop health card, while FCM, UnifiedPush, and
+  desktop toast forwarding are suppressed.
 - `original-source/systemd/user/androidtools-notification-health.timer` runs
   the monitor every minute on CHRS.
 
@@ -41,3 +42,6 @@ A direct probe can be sent with:
 ```bash
 python3 /android/androidtools/py_modules/notification_health_monitor.py --probe --json
 ```
+
+The probe is UI-only as well; it creates a health record for the next APP or
+desktop synchronization without raising a phone or Windows notification.

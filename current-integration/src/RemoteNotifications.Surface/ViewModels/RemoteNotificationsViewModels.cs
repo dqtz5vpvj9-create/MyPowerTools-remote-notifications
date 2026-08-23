@@ -34,6 +34,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private string _searchQuery = "";
     private string _waterline;
     private CancellationTokenSource? _serviceRefreshCancellation;
+    private RemoteNotificationRecord? _latestSystemHealth;
 
     public RemoteNotificationsViewModel(
         RemoteNotificationsSnapshot snapshot,
@@ -60,6 +61,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         KnownLabels = new ObservableCollection<string>(snapshot.KnownLabels);
         Messages = new ObservableCollection<RemoteNotificationMessageViewModel>(
             snapshot.MessagesOldestFirst.Reverse().Select(message => new RemoteNotificationMessageViewModel(message)));
+        ObserveSystemHealth(snapshot.MessagesOldestFirst);
         _seenIds = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
         foreach (var message in Messages.Reverse())
         {
@@ -158,17 +160,24 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                 {
                     var message = new RemoteNotificationMessageViewModel(match.Message);
                     Messages.Insert(0, message);
-                    TouchLabel(message.Label);
+                    if (!RemoteNotificationsLegacyStore.IsSystemHealthRecord(match.Message))
+                    {
+                        TouchLabel(message.Label);
+                    }
                 }
 
-                var result = await _toastPublisher.PublishAsync(
-                    match.Message,
-                    match.StableId,
-                    PersistentWindowsToasts,
-                    cancellationToken).ConfigureAwait(true);
-                if (result.Shown)
+                ObserveSystemHealth(match.Message);
+                if (!RemoteNotificationsLegacyStore.IsSystemHealthRecord(match.Message))
                 {
-                    shown++;
+                    var result = await _toastPublisher.PublishAsync(
+                        match.Message,
+                        match.StableId,
+                        PersistentWindowsToasts,
+                        cancellationToken).ConfigureAwait(true);
+                    if (result.Shown)
+                    {
+                        shown++;
+                    }
                 }
             }
 
@@ -217,8 +226,10 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                 .Where(IsSaneNotification)
                 .OrderBy(message => ParseSortTime(message.ServerTimestamp.Length > 0 ? message.ServerTimestamp : message.Timestamp))
                 .ToArray();
+            ObserveSystemHealth(saneNotifications);
             var shown = 0;
             var toastCount = 0;
+            var healthReceived = false;
             const int maxToasts = 3;
             foreach (var notification in saneNotifications)
             {
@@ -229,13 +240,18 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                     continue;
                 }
 
+                var isSystemHealth = RemoteNotificationsLegacyStore.IsSystemHealthRecord(notification);
+                healthReceived |= isSystemHealth;
                 if (!RemoteNotificationsLegacyStore.IsTaskCompletedRecord(notification))
                 {
                     var message = new RemoteNotificationMessageViewModel(notification);
                     Messages.Insert(0, message);
-                    TouchLabel(message.Label);
+                    if (!isSystemHealth)
+                    {
+                        TouchLabel(message.Label);
+                    }
                 }
-                if (toastCount < maxToasts)
+                if (!isSystemHealth && toastCount < maxToasts)
                 {
                     _ = await _toastPublisher.PublishAsync(
                         notification,
@@ -243,11 +259,14 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
                         PersistentWindowsToasts,
                         cancellationToken).ConfigureAwait(true);
                 }
-                toastCount++;
-                shown++;
+                if (!isSystemHealth)
+                {
+                    toastCount++;
+                    shown++;
+                }
             }
 
-            if (shown > 0)
+            if (shown > 0 || healthReceived)
             {
                 ApplyMergedHistoryToView();
                 var seenSnapshot = _seenIds.OldestFirst;
@@ -371,6 +390,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private void ReloadPersistedSnapshot()
     {
         var snapshot = _store.Load();
+        ObserveSystemHealth(snapshot.MessagesOldestFirst);
         var persistedNewestFirst = snapshot.MessagesOldestFirst.Reverse().ToArray();
         var currentSources = Messages.Select(message => message.Source).ToArray();
         var persistedSources = persistedNewestFirst.ToArray();
@@ -425,6 +445,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     public void ClearMessages()
     {
         Messages.Clear();
+        _latestSystemHealth = null;
         _store.ClearMessages();
         NotifyMessageViewChanged();
     }
@@ -482,7 +503,9 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         Chips.Clear();
         // The Claude Task label has its own dedicated page — never a chip.
         var chipLabels = KnownLabels
-            .Where(label => !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal))
+            .Where(label =>
+                !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+                !label.StartsWith("CHRS 健康", StringComparison.Ordinal))
             .ToArray();
         if (chipLabels.Length == 0)
         {
@@ -526,6 +549,43 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         OnPropertyChanged(nameof(EmptyOverlayText));
         OnPropertyChanged(nameof(MessageCountText));
         OnPropertyChanged(nameof(SearchResultText));
+        OnPropertyChanged(nameof(HasSystemHealth));
+        OnPropertyChanged(nameof(SystemHealthText));
+        OnPropertyChanged(nameof(SystemHealthForeground));
+        OnPropertyChanged(nameof(SystemHealthBackground));
+    }
+
+    private void ObserveSystemHealth(IEnumerable<RemoteNotificationRecord> records)
+    {
+        foreach (var record in records)
+        {
+            ObserveSystemHealth(record);
+        }
+    }
+
+    private void ObserveSystemHealth(RemoteNotificationRecord record)
+    {
+        if (!RemoteNotificationsLegacyStore.IsSystemHealthRecord(record))
+        {
+            return;
+        }
+
+        var currentTime = ParseSortTime(record.ServerTimestamp.Length > 0 ? record.ServerTimestamp : record.Timestamp);
+        var previousTime = _latestSystemHealth is null
+            ? DateTimeOffset.MinValue
+            : ParseSortTime(_latestSystemHealth.ServerTimestamp.Length > 0
+                ? _latestSystemHealth.ServerTimestamp
+                : _latestSystemHealth.Timestamp);
+        if (_latestSystemHealth is not null && currentTime < previousTime)
+        {
+            return;
+        }
+
+        _latestSystemHealth = record;
+        OnPropertyChanged(nameof(HasSystemHealth));
+        OnPropertyChanged(nameof(SystemHealthText));
+        OnPropertyChanged(nameof(SystemHealthForeground));
+        OnPropertyChanged(nameof(SystemHealthBackground));
     }
 
     private static bool IsSaneNotification(RemoteNotificationRecord notification)

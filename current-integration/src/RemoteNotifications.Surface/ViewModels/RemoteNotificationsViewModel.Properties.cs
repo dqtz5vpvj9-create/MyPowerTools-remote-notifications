@@ -19,9 +19,11 @@ public sealed partial class RemoteNotificationsViewModel
     // so HasLabels — which drives chip-strip visibility — must reflect
     // the chip count, not the raw KnownLabels count.
     public bool HasLabels =>
-        KnownLabels.Any(label => !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal));
+        KnownLabels.Any(label =>
+            !string.Equals(label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+            !label.StartsWith("CHRS 健康", StringComparison.Ordinal));
     public string FilterLabel => _filterLabel ?? RemoteNotificationsLegacyStore.FilterAll;
-    public int TotalCount => Messages.Count;
+    public int TotalCount => Messages.Count(message => !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source));
 
     /** Fixed label produced by the Python sender for Claude Stop events
      *  triggered by <task-notification> / isMeta / other synthetic user
@@ -58,7 +60,9 @@ public sealed partial class RemoteNotificationsViewModel
             if (_filterLabel is null && query.Length == 0)
             {
                 _cachedVisibleMessages = Messages
-                    .Where(message => !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal))
+                    .Where(message =>
+                        !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+                        !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source))
                     .ToArray();
                 return _cachedVisibleMessages;
             }
@@ -66,6 +70,7 @@ public sealed partial class RemoteNotificationsViewModel
             _cachedVisibleMessages = Messages
                 .Where(message =>
                     !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+                    !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source) &&
                     (_filterLabel is null || string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)) &&
                     (query.Length == 0 || message.MatchesSearch(query)))
                 .ToArray();
@@ -118,13 +123,25 @@ public sealed partial class RemoteNotificationsViewModel
         get
         {
             var isFiltered = _filterLabel is not null || HasSearchQuery;
-            var count = isFiltered ? VisibleMessages.Count : Messages.Count;
+            var count = VisibleMessages.Count;
+            var allCount = TotalCount;
             var suffix = count == 1 ? "" : "s";
             return !isFiltered
                 ? $"{count.ToString(CultureInfo.InvariantCulture)} message{suffix}"
-                : $"{count.ToString(CultureInfo.InvariantCulture)} of {Messages.Count.ToString(CultureInfo.InvariantCulture)} message{suffix}";
+                : $"{count.ToString(CultureInfo.InvariantCulture)} of {allCount.ToString(CultureInfo.InvariantCulture)} message{suffix}";
         }
     }
+
+    public bool HasSystemHealth => _latestSystemHealth is not null;
+    public string SystemHealthText => _latestSystemHealth?.Message ?? "";
+    public string SystemHealthForeground =>
+        _latestSystemHealth?.Message.Contains("健康恢复", StringComparison.Ordinal) == true
+            ? "#2E7D32"
+            : "#9A3412";
+    public string SystemHealthBackground =>
+        _latestSystemHealth?.Message.Contains("健康恢复", StringComparison.Ordinal) == true
+            ? "#E8F5E9"
+            : "#FFF7ED";
 
     public bool PersistentWindowsToasts
     {

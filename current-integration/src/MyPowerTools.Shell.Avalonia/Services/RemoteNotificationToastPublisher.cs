@@ -74,6 +74,10 @@ public sealed class RemoteNotificationWindowsToastPublisher : IRemoteNotificatio
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (RemoteNotificationsLegacyStore.IsSystemHealthRecord(notification))
+        {
+            return Task.FromResult(new RemoteNotificationToastPublishResult(false, "silent-system-health"));
+        }
         var envelope = BuildEnvelope(notification, messageId, persistent);
         try
         {

@@ -13,13 +13,15 @@ public sealed partial class RemoteNotificationsViewModel
     public ICommand RetryCommand { get; }
     public ICommand ToggleErrorDetailsCommand { get; }
     public string Server => _settings.Endpoint;
-    public bool HasLabels => KnownLabels.Count > 0;
+    public bool HasLabels => KnownLabels.Any(label => !label.StartsWith("CHRS 健康", StringComparison.Ordinal));
     public string FilterLabel => _filterLabel ?? RemoteNotificationsLegacyStore.FilterAll;
-    public int TotalCount => Messages.Count;
+    public int TotalCount => Messages.Count(message => !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source));
 
     public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages => _filterLabel is null
-        ? Messages
-        : Messages.Where(message => string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)).ToArray();
+        ? Messages.Where(message => !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source)).ToArray()
+        : Messages.Where(message =>
+            !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source) &&
+            string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)).ToArray();
 
     public bool HasVisibleMessages => VisibleMessages.Count > 0;
     public bool ShowsEmptyOverlay => !HasVisibleMessages;
@@ -31,13 +33,25 @@ public sealed partial class RemoteNotificationsViewModel
     {
         get
         {
-            var count = _filterLabel is null ? Messages.Count : VisibleMessages.Count;
+            var count = VisibleMessages.Count;
+            var allCount = TotalCount;
             var suffix = count == 1 ? "" : "s";
             return _filterLabel is null
                 ? $"{count.ToString(CultureInfo.InvariantCulture)} message{suffix}"
-                : $"{count.ToString(CultureInfo.InvariantCulture)} of {Messages.Count.ToString(CultureInfo.InvariantCulture)} message{suffix}";
+                : $"{count.ToString(CultureInfo.InvariantCulture)} of {allCount.ToString(CultureInfo.InvariantCulture)} message{suffix}";
         }
     }
+
+    public bool HasSystemHealth => _latestSystemHealth is not null;
+    public string SystemHealthText => _latestSystemHealth?.Message ?? "";
+    public string SystemHealthForeground =>
+        _latestSystemHealth?.Message.Contains("健康恢复", StringComparison.Ordinal) == true
+            ? "#2E7D32"
+            : "#9A3412";
+    public string SystemHealthBackground =>
+        _latestSystemHealth?.Message.Contains("健康恢复", StringComparison.Ordinal) == true
+            ? "#E8F5E9"
+            : "#FFF7ED";
 
     public bool PersistentWindowsToasts
     {

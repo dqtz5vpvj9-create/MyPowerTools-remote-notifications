@@ -81,6 +81,10 @@ public sealed class RemoteNotificationWindowsToastPublisher : IRemoteNotificatio
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (RemoteNotificationsLegacyStore.IsSystemHealthRecord(notification))
+        {
+            return Task.FromResult(new RemoteNotificationToastPublishResult(false, "silent-system-health"));
+        }
         if (IsClaudeTaskNotification(notification))
         {
             return Task.FromResult(new RemoteNotificationToastPublishResult(false, "silent-claude-task"));

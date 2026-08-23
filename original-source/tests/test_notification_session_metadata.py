@@ -75,6 +75,8 @@ def test_server_source_uses_explicit_content_kind_for_automatic_records():
     source = (ROOT / "py_modules" / "simple_http_notification_server.py").read_text(encoding="utf-8")
     assert '"content_kind": str(raw.get("content_kind") or "")' in source
     assert 'str(content_kind or "").strip().lower() == "agent_internal"' in source
+    assert 'str(content_kind or "").strip().lower() == "system_health"' in source
+    assert "Stored UI-only system-health state without push forwarding" in source
     assert "_legacy_claude_automatic_record" not in source
 
 

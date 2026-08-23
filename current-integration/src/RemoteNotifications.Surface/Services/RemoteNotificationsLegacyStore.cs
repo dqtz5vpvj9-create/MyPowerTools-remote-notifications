@@ -706,6 +706,11 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                kind.Equals("claude_agent_internal", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsSystemHealthRecord(RemoteNotificationRecord message)
+    {
+        return string.Equals(message.ContentKind?.Trim(), "system_health", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsHistoricalClaudeInternalEvent(RemoteNotificationRecord message)
     {
         return string.Equals(message.SourceClient?.Trim(), "claude", StringComparison.OrdinalIgnoreCase) &&

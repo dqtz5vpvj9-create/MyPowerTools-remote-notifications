@@ -596,20 +596,11 @@ def add_notification(message: str, channel: str, icon: str = "info",
     }
     redis_conn.lpush(f"{redis_notifications}:{channel}", json.dumps(notification))
     logger.debug(f"Added notification id={notif_id[:8]} to channel: {channel}")
-    # Fire-and-forget UnifiedPush forward in a background thread
-    threading.Thread(
-        target=send_unifiedpush,
-        args=(
-            channel, message, icon, event_timestamp, notif_id, session_id,
-            session_name, source_client, source_event_id, source_message_id,
-            content_kind, stop_reason,
-        ),
-        daemon=True,
-    ).start()
-    # FCM is paused — keep code path for rollback via ENABLE_FCM=1.
-    if fcm_enabled and not fcm_paused:
+    ui_only = str(content_kind or "").strip().lower() == "system_health"
+    if not ui_only:
+        # Fire-and-forget UnifiedPush forward in a background thread
         threading.Thread(
-            target=send_fcm_push,
+            target=send_unifiedpush,
             args=(
                 channel, message, icon, event_timestamp, notif_id, session_id,
                 session_name, source_client, source_event_id, source_message_id,
@@ -617,6 +608,19 @@ def add_notification(message: str, channel: str, icon: str = "info",
             ),
             daemon=True,
         ).start()
+        # FCM is paused — keep code path for rollback via ENABLE_FCM=1.
+        if fcm_enabled and not fcm_paused:
+            threading.Thread(
+                target=send_fcm_push,
+                args=(
+                    channel, message, icon, event_timestamp, notif_id, session_id,
+                    session_name, source_client, source_event_id, source_message_id,
+                    content_kind, stop_reason,
+                ),
+                daemon=True,
+            ).start()
+    else:
+        logger.info("Stored UI-only system-health state without push forwarding")
     return {
         "status": "ok",
         "stored_new": True,

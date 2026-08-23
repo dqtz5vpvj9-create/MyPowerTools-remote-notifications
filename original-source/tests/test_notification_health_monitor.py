@@ -98,3 +98,9 @@ def test_backlog_restarts_dead_worker(tmp_path, monkeypatch):
         "started": True,
         "reason": "worker_dead",
     }
+
+
+def test_health_sender_marks_push_channel_ui_only():
+    source = (ROOT / "py_modules" / "notification_health_monitor.py").read_text(encoding="utf-8")
+    assert '"reason": "system_health_is_ui_only"' in source
+    assert "from py_modules.fcm_push import send_fcm_push" not in source

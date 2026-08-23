@@ -244,8 +244,11 @@ def _notification_id(message: str) -> str:
 
 
 def _send_direct(message: str, *, severity: str = "warning") -> dict[str, Any]:
-    """Send through HTTP and FCM independently of the event queue."""
-    result: dict[str, Any] = {"http": {}, "fcm": {}}
+    """Store the health state for UI polling without creating a push alert."""
+    result: dict[str, Any] = {
+        "http": {},
+        "fcm": {"suppressed": True, "reason": "system_health_is_ui_only"},
+    }
     notif_id = _notification_id(message)
     timestamp = _timestamp()
     try:
@@ -278,26 +281,10 @@ def _send_direct(message: str, *, severity: str = "warning") -> dict[str, Any]:
         )
     except Exception as exc:
         result["http"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
-    try:
-        from py_modules.fcm_push import send_fcm_push
-
-        result["fcm"] = send_fcm_push(
-            "default",
-            message,
-            severity,
-            timestamp=timestamp,
-            notif_id=notif_id,
-            session_name="CHRS notification health",
-            source_client="chris-health",
-            content_kind="system_health",
-        )
-    except Exception as exc:
-        result["fcm"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
     result["delivered"] = bool(
         result["http"].get("accepted", False)
         or result["http"].get("ok", False)
         or result["http"].get("status") == "ok"
-        or result["fcm"].get("sent", 0)
     )
     return result
 
