@@ -333,6 +333,37 @@ def test_codex_stop_message_quotes_user_request(tmp_path, monkeypatch):
     assert "这是回复" in message
 
 
+def test_codex_stop_message_survives_torn_utf8_jsonl(tmp_path, monkeypatch):
+    transcript = tmp_path / "codex-broken.jsonl"
+    valid_user = json.dumps({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "继续发送健康报告"}],
+        },
+    }, ensure_ascii=False).encode("utf-8")
+    # This reproduces a provider line split in the middle of a Chinese UTF-8
+    # sequence. The malformed line is transport noise; the later user row is
+    # still usable for the notification body.
+    torn_line = (
+        b'{"type":"response_item","payload":{"type":"message",'
+        b'"role":"assistant","content":[{"type":"text","text":"\xe7\n'
+        b'broken"}]}}\n'
+    )
+    transcript.write_bytes(torn_line + valid_user + b"\n")
+    module = load_send_module()
+    payload = {
+        "session_id": "codex-broken",
+        "transcript_path": str(transcript),
+        "cwd": str(tmp_path),
+        "hook_event_name": "Stop",
+        "last_assistant_message": "已完成",
+    }
+    message = module.format_stop_message(payload, "codex")
+    assert "> 继续发送健康报告" in message
+
+
 def test_cursor_stop_message_reads_transcript(tmp_path):
     conversation_id = "61e0d768-a565-4270-a0bc-d4288ef08d08"
     transcript = tmp_path / "cursor.jsonl"

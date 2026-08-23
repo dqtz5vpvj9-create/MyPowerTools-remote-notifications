@@ -26,6 +26,8 @@ def configure_queue(tmp_path, monkeypatch):
     monkeypatch.setattr(notification_queue, "DEDUP_DIR", queue_root / "dedupe")
     monkeypatch.setattr(notification_queue, "LOG_PATH", queue_root / "worker.log")
     monkeypatch.setattr(notification_queue, "LOCK_PATH", queue_root / "worker.lock")
+    monkeypatch.setattr(notification_queue, "HEALTH_PATH", queue_root / "health.json")
+    monkeypatch.setattr(notification_queue, "PID_PATH", queue_root / "worker.pid")
     return queue_root
 
 
@@ -124,3 +126,40 @@ def test_send_command_uses_queue_timestamp(tmp_path, monkeypatch):
     assert "--timestamp" in cmd
     assert cmd[cmd.index("--timestamp") + 1] == item["timestamp"]
     assert item["id"] == item_id
+
+
+def test_source_parse_failure_is_quarantined_and_reported(tmp_path, monkeypatch):
+    configure_queue(tmp_path, monkeypatch)
+    monkeypatch.setattr(notification_queue, "PERMANENT_FAILURE_ATTEMPTS", 2)
+    monkeypatch.setattr(notification_queue, "MAX_ATTEMPTS", 99)
+    monkeypatch.setattr(notification_queue, "BACKOFF_BASE_SECONDS", 0.0)
+    monkeypatch.setattr(notification_queue, "BACKOFF_MAX_SECONDS", 0.0)
+    item_id = notification_queue.enqueue(
+        raw_stdin="{}",
+        message=None,
+        hook="Stop",
+        client="codex",
+        icon="codex",
+        channel="default",
+    )
+
+    def send_func(_item):
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="UnicodeDecodeError: invalid continuation byte",
+        )
+
+    notification_queue.process_due_items(send_func=send_func, now=100.0)
+    notification_queue.process_due_items(send_func=send_func, now=100.0)
+
+    assert list(notification_queue.PENDING_DIR.glob("*.json")) == []
+    failed = list(notification_queue.FAILED_DIR.glob("*.json"))
+    assert len(failed) == 1
+    failed_data = json.loads(failed[0].read_text())
+    assert failed_data["id"] == item_id
+    assert failed_data["failure_kind"] == "source_parse"
+    health = notification_queue.queue_health_snapshot(now=100.0)
+    assert health["failed_count"] == 1
+    assert health["last_error_kind"] == "source_parse"

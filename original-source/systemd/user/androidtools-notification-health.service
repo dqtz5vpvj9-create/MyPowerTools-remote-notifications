@@ -1,0 +1,8 @@
+[Unit]
+Description=AndroidTools notification pipeline health monitor
+
+[Service]
+Type=oneshot
+Environment=HOME=%h
+Environment=PYTHONPATH=/android/androidtools
+ExecStart=%h/miniconda3/envs/android_automatic_314/bin/python3 /android/androidtools/py_modules/notification_health_monitor.py

@@ -37,6 +37,8 @@ FAILED_DIR = QUEUE_ROOT / "failed"
 DEDUP_DIR = QUEUE_ROOT / "dedupe"
 LOG_PATH = QUEUE_ROOT / "worker.log"
 LOCK_PATH = QUEUE_ROOT / "worker.lock"
+HEALTH_PATH = QUEUE_ROOT / "health.json"
+PID_PATH = QUEUE_ROOT / "worker.pid"
 SEND_NOTIFICATION = Path(__file__).with_name("send_notification.py")
 
 BACKOFF_BASE_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_RETRY_BASE", "5"))
@@ -44,6 +46,30 @@ BACKOFF_MAX_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_RETRY_MAX", "300
 MAX_ITEM_AGE_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_MAX_AGE", "86400"))
 WORKER_POLL_MAX_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_WORKER_POLL_MAX", "5"))
 DEDUP_TTL_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_DEDUP_TTL", "60"))
+PERMANENT_FAILURE_ATTEMPTS = int(os.environ.get("ANDROIDTOOLS_NOTIFY_PERMANENT_FAILURE_ATTEMPTS", "3"))
+MAX_ATTEMPTS = int(os.environ.get("ANDROIDTOOLS_NOTIFY_MAX_ATTEMPTS", "12"))
+
+_SOURCE_FAILURE_MARKERS = (
+    "unicodedecodeerror",
+    "unicodeencodeerror",
+    "jsondecodeerror",
+    "invalid control character",
+    "invalid continuation byte",
+)
+_DISK_FAILURE_MARKERS = (
+    "no space left on device",
+    "disk quota exceeded",
+)
+_TRANSPORT_FAILURE_MARKERS = (
+    "timeout",
+    "timed out",
+    "connection refused",
+    "connection reset",
+    "temporary failure",
+    "502",
+    "503",
+    "504",
+)
 
 SendFunc = Callable[[dict[str, Any]], subprocess.CompletedProcess[str]]
 
@@ -51,6 +77,110 @@ SendFunc = Callable[[dict[str, Any]], subprocess.CompletedProcess[str]]
 def _ensure_dirs() -> None:
     for path in (PENDING_DIR, INFLIGHT_DIR, FAILED_DIR, DEDUP_DIR):
         path.mkdir(parents=True, exist_ok=True)
+
+
+def _load_health_state() -> dict[str, Any]:
+    try:
+        with HEALTH_PATH.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _health_update(**updates: Any) -> None:
+    """Persist a small, best-effort worker health heartbeat.
+
+    Health reporting must never turn a notification failure into a hook
+    failure, especially when the filesystem is under pressure.
+    """
+    try:
+        _ensure_dirs()
+        state = _load_health_state()
+        state.update(updates)
+        state["updated_at"] = _now()
+        _atomic_write_json(HEALTH_PATH, state)
+    except Exception:
+        pass
+
+
+def _pid_is_alive(pid: object) -> bool:
+    try:
+        value = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if value <= 0:
+        return False
+    try:
+        os.kill(value, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _failure_kind(error: str) -> str:
+    text = str(error or "").lower()
+    if any(marker in text for marker in _SOURCE_FAILURE_MARKERS):
+        return "source_parse"
+    if any(marker in text for marker in _DISK_FAILURE_MARKERS):
+        return "disk"
+    if any(marker in text for marker in _TRANSPORT_FAILURE_MARKERS):
+        return "transport"
+    return "delivery"
+
+
+def queue_health_snapshot(now: float | None = None) -> dict[str, Any]:
+    """Return queue and worker state for the independent health monitor."""
+    now = _now() if now is None else now
+    _ensure_dirs()
+    pending = list(PENDING_DIR.glob("*.json"))
+    inflight = list(INFLIGHT_DIR.glob("*.json"))
+    failed = list(FAILED_DIR.glob("*.json"))
+    oldest_created_at = None
+    for path in pending + inflight:
+        item = _load_json(path)
+        if not item:
+            continue
+        created = float(item.get("created_at", now))
+        oldest_created_at = created if oldest_created_at is None else min(oldest_created_at, created)
+    state = _load_health_state()
+    pid = state.get("worker_pid")
+    if not pid:
+        try:
+            pid = PID_PATH.read_text(encoding="ascii").strip()
+        except OSError:
+            pid = ""
+    heartbeat = state.get("worker_heartbeat_at")
+    heartbeat_age = None
+    if heartbeat:
+        try:
+            heartbeat_age = max(0.0, now - float(heartbeat))
+        except (TypeError, ValueError):
+            heartbeat_age = None
+    return {
+        "now": now,
+        "pending_count": len(pending),
+        "inflight_count": len(inflight),
+        "backlog_count": len(pending) + len(inflight),
+        "failed_count": len(failed),
+        "oldest_pending_at": oldest_created_at,
+        "oldest_pending_age": (
+            max(0.0, now - oldest_created_at) if oldest_created_at is not None else 0.0
+        ),
+        "worker_pid": pid or "",
+        "worker_alive": _pid_is_alive(pid),
+        "worker_state": state.get("worker_state", "unknown"),
+        "worker_heartbeat_at": heartbeat,
+        "worker_heartbeat_age": heartbeat_age,
+        "last_enqueue_at": state.get("last_enqueue_at"),
+        "last_success_at": state.get("last_success_at"),
+        "last_failure_at": state.get("last_failure_at"),
+        "last_error_kind": state.get("last_error_kind", ""),
+        "last_error": state.get("last_error", ""),
+        "last_success_id": state.get("last_success_id", ""),
+        "last_failure_id": state.get("last_failure_id", ""),
+        "last_quarantined_id": state.get("last_quarantined_id", ""),
+    }
 
 
 def _now() -> float:
@@ -66,9 +196,13 @@ def _event_timestamp(epoch_seconds: float) -> str:
 
 
 def _log(message: str) -> None:
-    _ensure_dirs()
-    with LOG_PATH.open("a", encoding="utf-8") as fh:
-        fh.write(f"{_timestamp()} {message}\n")
+    try:
+        _ensure_dirs()
+        with LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(f"{_timestamp()} {message}\n")
+    except OSError:
+        # A full disk must still leave the worker and its health monitor alive.
+        pass
 
 
 def _item_path(item: dict[str, Any], directory: Path | None = None) -> Path:
@@ -219,7 +353,16 @@ def enqueue(
         "raw_stdin": raw_stdin,
         "message": message,
     }
-    _atomic_write_json(_item_path(item), item)
+    try:
+        _atomic_write_json(_item_path(item), item)
+    except Exception as exc:
+        _health_update(
+            last_enqueue_failure_at=created_at,
+            last_error_kind="queue_write",
+            last_error=f"{type(exc).__name__}: {str(exc)[:240]}",
+        )
+        raise
+    _health_update(last_enqueue_at=created_at, last_enqueue_id=item["id"])
     _log(
         f"queued id={item['id']} client_msg_id={client_msg_id} "
         f"hook={hook or '-'} client={client} channel={channel}"
@@ -335,6 +478,12 @@ def process_due_items(send_func: SendFunc = send_item, now: float | None = None)
 
         processed += 1
         attempts = int(item.get("attempts", 0)) + 1
+        _health_update(
+            worker_heartbeat_at=now,
+            current_item_id=item.get("id", ""),
+            current_item_started_at=now,
+            current_item_attempt=attempts,
+        )
         item["attempts"] = attempts
         result: subprocess.CompletedProcess[str] | None = None
         exc: Exception | None = None
@@ -349,10 +498,48 @@ def process_due_items(send_func: SendFunc = send_item, now: float | None = None)
             except FileNotFoundError:
                 pass
             _log(f"sent id={item.get('id')} attempts={attempts}")
+            _health_update(
+                last_success_at=now,
+                last_success_id=item.get("id", ""),
+                last_error="",
+                last_error_kind="",
+                current_item_id="",
+                current_item_started_at=None,
+                current_item_attempt=0,
+            )
             continue
 
         item["last_error"] = _summarize_failure(result, exc)
         item["last_attempt_at"] = now
+        item["failure_kind"] = _failure_kind(item["last_error"])
+        _health_update(
+            last_failure_at=now,
+            last_failure_id=item.get("id", ""),
+            last_error_kind=item["failure_kind"],
+            last_error=item["last_error"],
+        )
+        quarantine = (
+            item["failure_kind"] == "source_parse"
+            and attempts >= PERMANENT_FAILURE_ATTEMPTS
+        ) or attempts >= MAX_ATTEMPTS
+        if quarantine:
+            _atomic_write_json(FAILED_DIR / inflight.name, item)
+            try:
+                inflight.unlink()
+            except FileNotFoundError:
+                pass
+            _log(
+                f"quarantine id={item.get('id')} attempts={attempts} "
+                f"kind={item['failure_kind']} error={item['last_error']}"
+            )
+            _health_update(
+                last_quarantined_at=now,
+                last_quarantined_id=item.get("id", ""),
+                current_item_id="",
+                current_item_started_at=None,
+                current_item_attempt=0,
+            )
+            continue
         if now - float(item.get("created_at", now)) >= MAX_ITEM_AGE_SECONDS:
             _atomic_write_json(FAILED_DIR / inflight.name, item)
             try:
@@ -360,6 +547,13 @@ def process_due_items(send_func: SendFunc = send_item, now: float | None = None)
             except FileNotFoundError:
                 pass
             _log(f"expired id={item.get('id')} attempts={attempts} error={item['last_error']}")
+            _health_update(
+                last_quarantined_at=now,
+                last_quarantined_id=item.get("id", ""),
+                current_item_id="",
+                current_item_started_at=None,
+                current_item_attempt=0,
+            )
             continue
 
         item["next_attempt_at"] = now + _backoff_delay(attempts)
@@ -371,6 +565,11 @@ def process_due_items(send_func: SendFunc = send_item, now: float | None = None)
         _log(
             f"retry id={item.get('id')} attempts={attempts} "
             f"next_in={item['next_attempt_at'] - now:.1f}s error={item['last_error']}"
+        )
+        _health_update(
+            current_item_id="",
+            current_item_started_at=None,
+            current_item_attempt=0,
         )
     return processed
 
@@ -424,32 +623,116 @@ def worker_loop(send_func: SendFunc = send_item) -> None:
     with worker_lock() as acquired:
         if not acquired:
             return
+        pid = os.getpid()
+        try:
+            _ensure_dirs()
+            PID_PATH.write_text(str(pid), encoding="ascii")
+        except OSError:
+            pass
+        _health_update(
+            worker_state="running",
+            worker_pid=pid,
+            worker_started_at=_now(),
+            worker_heartbeat_at=_now(),
+            current_item_id="",
+            current_item_started_at=None,
+            current_item_attempt=0,
+        )
         _restore_inflight()
         _log("worker_start")
-        while True:
-            now = _now()
-            processed = process_due_items(send_func=send_func, now=now)
-            if processed:
-                continue
-            due = next_due_at()
-            if due is None:
-                _log("worker_idle_exit")
-                return
-            sleep_for = max(0.0, min(WORKER_POLL_MAX_SECONDS, due - now))
-            time.sleep(sleep_for)
+        terminal_state = "idle"
+        try:
+            while True:
+                now = _now()
+                _health_update(worker_heartbeat_at=now)
+                processed = process_due_items(send_func=send_func, now=now)
+                if processed:
+                    continue
+                due = next_due_at()
+                if due is None:
+                    _log("worker_idle_exit")
+                    return
+                sleep_for = max(0.0, min(WORKER_POLL_MAX_SECONDS, due - now))
+                time.sleep(sleep_for)
+        except Exception as exc:
+            terminal_state = "crashed"
+            _health_update(
+                worker_state="crashed",
+                worker_crashed_at=_now(),
+                last_error_kind="worker",
+                last_error=f"{type(exc).__name__}: {str(exc)[:240]}",
+            )
+            _log(f"worker_crash error={type(exc).__name__}: {str(exc)[:240]}")
+            return
+        finally:
+            try:
+                if PID_PATH.read_text(encoding="ascii").strip() == str(pid):
+                    PID_PATH.unlink()
+            except OSError:
+                pass
+            _health_update(
+                worker_state=terminal_state,
+                worker_pid="",
+                worker_heartbeat_at=_now(),
+                current_item_id="",
+                current_item_started_at=None,
+                current_item_attempt=0,
+            )
 
 
 def start_worker() -> None:
     _ensure_dirs()
-    with LOG_PATH.open("a", encoding="utf-8") as log:
+    command = [sys.executable, str(Path(__file__).resolve()), "worker"]
+    try:
+        with LOG_PATH.open("a", encoding="utf-8") as log:
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                start_new_session=True,
+            )
+    except OSError:
+        # Keep delivery alive when the log filesystem is full. The worker
+        # heartbeat remains available through health.json when it can write.
         subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "worker"],
+            command,
             stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             close_fds=True,
             start_new_session=True,
         )
+
+
+def requeue_failed(*, failure_kind: str = "") -> int:
+    """Move quarantined items back to pending for a deliberate replay."""
+    _ensure_dirs()
+    moved = 0
+    for path in sorted(FAILED_DIR.glob("*.json")):
+        item = _load_json(path)
+        if not item:
+            continue
+        item_kind = str(item.get("failure_kind") or _failure_kind(item.get("last_error", "")))
+        if failure_kind and item_kind != failure_kind:
+            continue
+        item["attempts"] = 0
+        item["next_attempt_at"] = 0.0
+        item.pop("last_error", None)
+        item.pop("last_attempt_at", None)
+        item.pop("failure_kind", None)
+        target = PENDING_DIR / path.name
+        try:
+            _atomic_write_json(target, item)
+            path.unlink()
+        except OSError:
+            continue
+        moved += 1
+    if moved:
+        _health_update(last_requeue_at=_now(), last_requeue_count=moved)
+        start_worker()
+    return moved
 
 
 def main() -> int:
@@ -467,10 +750,20 @@ def main() -> int:
     enqueue_parser.add_argument("--no-start-worker", action="store_true")
 
     subparsers.add_parser("worker")
+    subparsers.add_parser("health")
+    recover_parser = subparsers.add_parser("requeue-failed")
+    recover_parser.add_argument("--failure-kind", default="")
 
     args = parser.parse_args()
     if args.command == "worker":
         worker_loop()
+        return 0
+    if args.command == "health":
+        print(json.dumps(queue_health_snapshot(), ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.command == "requeue-failed":
+        moved = requeue_failed(failure_kind=args.failure_kind)
+        print(f"requeued {moved}")
         return 0
 
     raw_stdin = None

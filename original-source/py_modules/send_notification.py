@@ -279,7 +279,7 @@ def _codex_thread_name(session_id: str) -> str:
         return ""
     path = os.path.expanduser("~/.codex/session_index.jsonl")
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except OSError:
         return ""
@@ -313,30 +313,59 @@ def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
         if not matches:
             return ""
         path = max(matches, key=os.path.getmtime)
-    last = ""
+    def user_text(event: object) -> str:
+        if not isinstance(event, dict) or event.get("type") != "response_item":
+            return ""
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict) or payload.get("type") != "message" or payload.get("role") != "user":
+            return ""
+        parts = []
+        for block in payload.get("content") or []:
+            if isinstance(block, dict) and block.get("type") in ("input_text", "text"):
+                text = block.get("text")
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts).strip()
+
+    def parse_reverse(raw_lines) -> str:
+        for raw_line in reversed(raw_lines):
+            try:
+                event = json.loads(raw_line.decode("utf-8", errors="replace"))
+            except Exception:
+                continue
+            text = user_text(event)
+            if text:
+                return text
+        return ""
+
     try:
-        with open(path, encoding="utf-8") as fh:
+        tail_limit = max(64 * 1024, int(os.environ.get("ANDROIDTOOLS_CODEX_TRANSCRIPT_TAIL_BYTES", str(16 * 1024 * 1024))))
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            end = fh.tell()
+            start = max(0, end - tail_limit)
+            fh.seek(start)
+            tail = fh.read()
+        lines = tail.split(b"\n")
+        # The first fragment may start in the middle of a JSON line. Skipping
+        # it is safer than joining it with an earlier record.
+        last = parse_reverse(lines[1:] if start else lines)
+        if last:
+            return last
+        # Older sessions can place the last user prompt farther from the tail;
+        # retain a full-stream fallback with tolerant decoding.
+        with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 try:
                     event = json.loads(line)
                 except Exception:
                     continue
-                if event.get("type") != "response_item":
-                    continue
-                payload = event.get("payload") or {}
-                if payload.get("type") != "message" or payload.get("role") != "user":
-                    continue
-                parts = []
-                for block in payload.get("content") or []:
-                    if isinstance(block, dict) and block.get("type") in ("input_text", "text"):
-                        text = block.get("text")
-                        if text:
-                            parts.append(str(text))
-                if parts:
-                    last = "\n".join(parts).strip()
+                text = user_text(event)
+                if text:
+                    last = text
+        return last
     except OSError:
         return ""
-    return last
 
 
 def _claude_entry_text(entry: dict) -> str:

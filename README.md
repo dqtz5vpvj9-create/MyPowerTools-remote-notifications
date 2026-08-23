@@ -21,3 +21,23 @@ pwsh.exe -NoLogo -NoProfile -NonInteractive -File .\build.ps1 `
 The adapter depends on the MyPowerTools host SDK projects through the explicit
 `MyPowerToolsRepoRoot` MSBuild property. The preserved Python application remains
 independently runnable from `original-source/` with its own requirements.
+
+## CHRS notification self-health
+
+The Python hook path has an independent health monitor:
+
+- `original-source/py_modules/notification_queue.py` writes queue/worker
+  heartbeats, isolates repeated source-parsing failures, and exposes `health`
+  and `requeue-failed` commands.
+- `original-source/py_modules/notification_health_monitor.py` checks queue age,
+  worker liveness, failed items, hook completion, and disk pressure.
+- The monitor sends alerts through direct HTTP and direct FCM, outside the
+  event queue and transcript formatter.
+- `original-source/systemd/user/androidtools-notification-health.timer` runs
+  the monitor every minute on CHRS.
+
+A direct probe can be sent with:
+
+```bash
+python3 /android/androidtools/py_modules/notification_health_monitor.py --probe --json
+```

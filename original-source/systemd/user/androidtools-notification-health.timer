@@ -1,0 +1,11 @@
+[Unit]
+Description=Run AndroidTools notification pipeline health monitor
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=androidtools-notification-health.service
+
+[Install]
+WantedBy=timers.target
