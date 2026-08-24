@@ -246,6 +246,12 @@ static int DispatchBanners(
     var shown = 0;
     foreach (var notification in accepted)
     {
+        if (RemoteNotificationsLegacyStore.IsSystemHealthRecord(notification))
+        {
+            // Health state is persisted for the inbox header. It never becomes
+            // a desktop banner, including when the independent worker receives it.
+            continue;
+        }
         var envelope = BuildToastEnvelope(notification, persistent: keepWindowsBanners);
         try
         {

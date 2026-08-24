@@ -56,7 +56,6 @@ RAW_HOOK_LOGS = (
 PENDING_WARN_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_PENDING_WARN", "300"))
 WORKER_STALE_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_WORKER_STALE", "180"))
 HOOK_STALE_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_HOOK_STALE", "180"))
-ALERT_COOLDOWN_SECONDS = float(os.environ.get("ANDROIDTOOLS_NOTIFY_ALERT_COOLDOWN", "1800"))
 MIN_FREE_GB = float(os.environ.get("ANDROIDTOOLS_NOTIFY_MIN_FREE_GB", "5"))
 MIN_FREE_PERCENT = float(os.environ.get("ANDROIDTOOLS_NOTIFY_MIN_FREE_PERCENT", "3"))
 
@@ -179,7 +178,24 @@ def collect_health() -> dict[str, Any]:
     for detail in _hook_checks(now):
         issues.append({"code": "hook", "detail": detail})
 
-    signature = "|".join(f"{item['code']}:{item['detail']}" for item in issues)
+    # Keep changing measurements in the report, while keeping the alert
+    # identity stable.  Disk free space changes every minute under normal
+    # operation; it must not create a fresh alert for the same pressure state.
+    signature_parts: list[str] = []
+    for item in issues:
+        code = str(item.get("code") or "")
+        detail = str(item.get("detail") or "")
+        if code == "disk_pressure":
+            detail = detail.split(" free=", 1)[0]
+        elif code in {
+            "queue_backlog",
+            "failed_items",
+            "worker_dead",
+            "worker_stale",
+        } or code.startswith("send_"):
+            detail = ""
+        signature_parts.append(f"{code}:{detail}" if detail else code)
+    signature = "|".join(signature_parts)
     return {
         "schema": "androidtools.notification-health.v1",
         "checked_at": now,
@@ -310,11 +326,6 @@ def run_once(*, force: bool = False, probe: bool = False) -> dict[str, Any]:
         )
         state["last_alert_at"] = now
         state["last_alert_signature"] = signature or "recovery"
-        state["last_delivery"] = delivery
-    elif signature and now - float(state.get("last_alert_at", 0.0)) >= ALERT_COOLDOWN_SECONDS:
-        delivery = _send_direct(_health_message(report), severity="error")
-        state["last_alert_at"] = now
-        state["last_alert_signature"] = signature
         state["last_delivery"] = delivery
     state["active_signature"] = signature
     state["last_run_at"] = now

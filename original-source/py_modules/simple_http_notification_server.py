@@ -107,6 +107,16 @@ def _is_explicit_agent_internal(record: dict[str, Any]) -> bool:
     return str(record.get("content_kind") or "").strip().lower() == "agent_internal"
 
 
+def _is_system_health(record: dict[str, Any]) -> bool:
+    """Identify CHRS health state even when an old sender omitted the kind."""
+    kind = str(record.get("content_kind") or "").strip().lower()
+    if kind == "system_health":
+        return True
+    source = str(record.get("source_client") or "").strip().lower()
+    message = str(record.get("message") or "").lstrip()
+    return source == "chris-health" and message.startswith("[CHRS 健康")
+
+
 def _purge_explicit_agent_internal(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [record for record in records if not _is_explicit_agent_internal(record)]
 
@@ -596,7 +606,12 @@ def add_notification(message: str, channel: str, icon: str = "info",
     }
     redis_conn.lpush(f"{redis_notifications}:{channel}", json.dumps(notification))
     logger.debug(f"Added notification id={notif_id[:8]} to channel: {channel}")
-    ui_only = str(content_kind or "").strip().lower() == "system_health"
+    declared_ui_only = str(content_kind or "").strip().lower() == "system_health"
+    ui_only = declared_ui_only or _is_system_health({
+        "content_kind": content_kind,
+        "source_client": source_client,
+        "message": message,
+    })
     if not ui_only:
         # Fire-and-forget UnifiedPush forward in a background thread
         threading.Thread(

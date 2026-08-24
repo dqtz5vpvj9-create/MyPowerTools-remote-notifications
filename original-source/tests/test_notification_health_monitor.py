@@ -70,6 +70,30 @@ def test_degraded_signature_is_reported_once_until_it_changes(tmp_path, monkeypa
     assert len(deliveries) == 1
 
 
+def test_disk_measurement_changes_keep_the_same_alert_identity(monkeypatch):
+    monkeypatch.setattr(monitor.notification_queue, "queue_health_snapshot", lambda now: {
+        "pending_count": 0,
+        "inflight_count": 0,
+        "failed_count": 0,
+        "oldest_pending_age": 0.0,
+        "worker_alive": False,
+        "worker_state": "idle",
+        "worker_heartbeat_age": None,
+        "last_error_kind": "",
+        "last_error": "",
+    })
+    disks = [{"path": "/android", "ok": False, "free_gb": 4.1, "free_percent": 2.0}]
+    monkeypatch.setattr(monitor, "_disk_checks", lambda: disks)
+    monkeypatch.setattr(monitor, "_hook_checks", lambda _now: [])
+
+    first = monitor.collect_health()
+    disks[0] = {"path": "/android", "ok": False, "free_gb": 3.9, "free_percent": 1.9}
+    second = monitor.collect_health()
+
+    assert first["signature"] == second["signature"] == "disk_pressure:/android"
+    assert first["issues"] != second["issues"]
+
+
 def test_backlog_restarts_dead_worker(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, "MONITOR_STATE_PATH", tmp_path / "monitor.json")
     monkeypatch.setattr(monitor.notification_queue, "queue_health_snapshot", lambda now: {

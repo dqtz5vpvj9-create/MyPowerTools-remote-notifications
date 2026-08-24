@@ -434,7 +434,13 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     public static bool IsSystemHealthRecord(RemoteNotificationRecord message)
     {
-        return string.Equals(message.ContentKind?.Trim(), "system_health", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(message.ContentKind?.Trim(), "system_health", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(message.SourceClient?.Trim(), "chris-health", StringComparison.OrdinalIgnoreCase) &&
+               (message.Message?.TrimStart().StartsWith("[CHRS 健康", StringComparison.Ordinal) ?? false);
     }
 
     private static string AppendTaskCompleted(string message)
