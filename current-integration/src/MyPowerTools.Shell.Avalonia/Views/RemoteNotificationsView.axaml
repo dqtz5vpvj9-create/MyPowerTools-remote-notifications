@@ -83,22 +83,6 @@
                    Text="{Binding Title}"
                    TextTrimming="CharacterEllipsis"
                    ToolTip.Tip="{Binding Subtitle}" />
-        <Border Margin="0,4,0,0"
-                Padding="8,5"
-                CornerRadius="6"
-                BorderThickness="1"
-                BorderBrush="{Binding SystemHealthForeground}"
-                Background="{Binding SystemHealthBackground}"
-                IsVisible="{Binding HasSystemHealth}">
-          <StackPanel Spacing="2">
-            <TextBlock Text="CHRS notification health"
-                       FontWeight="SemiBold"
-                       Foreground="{Binding SystemHealthForeground}" />
-            <TextBlock Text="{Binding SystemHealthText}"
-                       TextWrapping="Wrap"
-                       Foreground="{Binding SystemHealthForeground}" />
-          </StackPanel>
-        </Border>
       </StackPanel>
 
       <Expander Grid.Column="1"
