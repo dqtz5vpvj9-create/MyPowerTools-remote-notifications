@@ -19,6 +19,9 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
     private RemoteNotificationsViewModel? _subscribedViewModel;
     private RemoteNotificationScrollAnchorState? _pendingScrollAnchor;
     private bool _scrollRestoreQueued;
+    private int _scrollAnchorLayoutPasses;
+    private int _scrollAnchorStableLayoutPasses;
+    private double _scrollAnchorLastExtent;
     private readonly RemoteNotificationDetailWindowService _detailWindows;
     private Point? _labelDragStart;
     private double _labelDragStartOffset;
@@ -54,7 +57,7 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
     {
         (DataContext as RemoteNotificationsViewModel)?.Deactivate();
         UnsubscribeFromMessageChanges();
-        _pendingScrollAnchor = null;
+        ClearPendingScrollAnchor();
         _scrollRestoreQueued = false;
         if (_hostScroller is not null)
         {
@@ -104,15 +107,29 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
     {
         var list = this.FindControl<ListBox>("NotificationList");
         var scroller = list?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (scroller is null)
+        if (list is null || scroller is null)
         {
             return;
         }
 
-        _pendingScrollAnchor ??= new RemoteNotificationScrollAnchorState(
-            scroller,
-            scroller.Offset.Y,
-            scroller.Extent.Height);
+        if (_pendingScrollAnchor is null)
+        {
+            var itemAnchor = CaptureReadingAnchor(list, scroller);
+            _pendingScrollAnchor = new RemoteNotificationScrollAnchorState(
+                scroller,
+                scroller.Offset.Y,
+                scroller.Extent.Height,
+                _hostScroller,
+                _hostScroller?.Offset.Y ?? 0,
+                _hostScroller?.Extent.Height ?? 0,
+                list,
+                itemAnchor.Item,
+                itemAnchor.Top);
+            _scrollAnchorLastExtent = scroller.Extent.Height;
+            _scrollAnchorLayoutPasses = 0;
+            _scrollAnchorStableLayoutPasses = 0;
+            scroller.LayoutUpdated += OnMessageListLayoutUpdated;
+        }
         if (_scrollRestoreQueued)
         {
             return;
@@ -126,19 +143,127 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
     {
         _scrollRestoreQueued = false;
         var anchor = _pendingScrollAnchor;
-        _pendingScrollAnchor = null;
         if (anchor is null || VisualRoot is null)
+        {
+            ClearPendingScrollAnchor();
+            return;
+        }
+
+        ApplyScrollAnchor(anchor);
+    }
+
+    private void OnMessageListLayoutUpdated(object? sender, EventArgs e)
+    {
+        if (_pendingScrollAnchor is not { } anchor)
         {
             return;
         }
 
+        ApplyScrollAnchor(anchor);
+        var currentExtent = anchor.Scroller.Extent.Height;
+        _scrollAnchorLayoutPasses++;
+        if (Math.Abs(currentExtent - _scrollAnchorLastExtent) <= 0.5)
+        {
+            _scrollAnchorStableLayoutPasses++;
+        }
+        else
+        {
+            _scrollAnchorLastExtent = currentExtent;
+            _scrollAnchorStableLayoutPasses = 0;
+        }
+
+        if (_scrollAnchorStableLayoutPasses >= 2 || _scrollAnchorLayoutPasses >= 8)
+        {
+            ClearPendingScrollAnchor();
+        }
+    }
+
+    private void ApplyScrollAnchor(RemoteNotificationScrollAnchorState anchor)
+    {
         var scroller = anchor.Scroller;
-        var offset = RemoteNotificationScrollAnchor.CalculateOffset(
+        var offset = CalculateCurrentListOffset(anchor);
+        if (Math.Abs(scroller.Offset.Y - offset) > 0.1)
+        {
+            scroller.Offset = new Vector(scroller.Offset.X, offset);
+        }
+
+        if (anchor.HostScroller is not { } hostScroller)
+        {
+            return;
+        }
+
+        var hostOffset = RemoteNotificationScrollAnchor.CalculateOffset(
+            anchor.HostOffset,
+            anchor.HostExtent,
+            hostScroller.Extent.Height,
+            hostScroller.Viewport.Height);
+        if (Math.Abs(hostScroller.Offset.Y - hostOffset) > 0.1)
+        {
+            hostScroller.Offset = new Vector(hostScroller.Offset.X, hostOffset);
+        }
+    }
+
+    private static (RemoteNotificationMessageViewModel? Item, double Top) CaptureReadingAnchor(
+        ListBox list,
+        ScrollViewer scroller)
+    {
+        foreach (var item in list.GetVisualDescendants().OfType<ListBoxItem>())
+        {
+            if (item.DataContext is not RemoteNotificationMessageViewModel message)
+            {
+                continue;
+            }
+
+            var origin = item.TranslatePoint(default, scroller);
+            if (origin is not { } point ||
+                point.Y + item.Bounds.Height <= 0 ||
+                point.Y >= scroller.Viewport.Height)
+            {
+                continue;
+            }
+
+            return (message, point.Y);
+        }
+
+        return (null, 0);
+    }
+
+    private static double CalculateCurrentListOffset(RemoteNotificationScrollAnchorState anchor)
+    {
+        var scroller = anchor.Scroller;
+        if (anchor.Offset > RemoteNotificationScrollAnchor.TopThreshold &&
+            anchor.Item is not null)
+        {
+            var currentItem = anchor.List
+                .GetVisualDescendants()
+                .OfType<ListBoxItem>()
+                .FirstOrDefault(item => ReferenceEquals(item.DataContext, anchor.Item));
+            var origin = currentItem?.TranslatePoint(default, scroller);
+            if (origin is { } point)
+            {
+                var maximum = Math.Max(0, scroller.Extent.Height - scroller.Viewport.Height);
+                return Math.Clamp(scroller.Offset.Y + point.Y - anchor.ItemTop, 0, maximum);
+            }
+        }
+
+        return RemoteNotificationScrollAnchor.CalculateOffset(
             anchor.Offset,
             anchor.Extent,
             scroller.Extent.Height,
             scroller.Viewport.Height);
-        scroller.Offset = new Vector(scroller.Offset.X, offset);
+    }
+
+    private void ClearPendingScrollAnchor()
+    {
+        if (_pendingScrollAnchor is { } anchor)
+        {
+            anchor.Scroller.LayoutUpdated -= OnMessageListLayoutUpdated;
+        }
+
+        _pendingScrollAnchor = null;
+        _scrollAnchorLayoutPasses = 0;
+        _scrollAnchorStableLayoutPasses = 0;
+        _scrollAnchorLastExtent = 0;
     }
 
     private void OnHostScrollerSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -389,7 +514,13 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
 public sealed record RemoteNotificationScrollAnchorState(
     ScrollViewer Scroller,
     double Offset,
-    double Extent);
+    double Extent,
+    ScrollViewer? HostScroller,
+    double HostOffset,
+    double HostExtent,
+    ListBox List,
+    RemoteNotificationMessageViewModel? Item,
+    double ItemTop);
 
 public static class RemoteNotificationScrollAnchor
 {

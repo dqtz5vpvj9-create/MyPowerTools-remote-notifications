@@ -7,7 +7,8 @@ namespace RemoteNotifications.Surface.ViewModels;
 
 public sealed partial class RemoteNotificationsViewModel
 {
-    private IReadOnlyList<RemoteNotificationMessageViewModel>? _cachedVisibleMessages;
+    private readonly ObservableCollection<RemoteNotificationMessageViewModel> _visibleMessages = [];
+    private ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>? _visibleMessagesView;
 
     public ObservableCollection<RemoteNotificationMessageViewModel> Messages { get; }
     public ObservableCollection<string> KnownLabels { get; }
@@ -31,51 +32,35 @@ public sealed partial class RemoteNotificationsViewModel
      *  shows only them. Chips omit this label — it lives on its own page. */
     public const string ClaudeTaskLabel = "Claude Task";
 
-    public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages
+    /// <summary>
+    /// Stable collection bound by the inbox ListBox. Its identity remains
+    /// unchanged while records arrive, so Avalonia can apply collection
+    /// changes without replacing the ItemsSource and losing the scroll anchor.
+    /// </summary>
+    public ReadOnlyObservableCollection<RemoteNotificationMessageViewModel> VisibleMessages =>
+        _visibleMessagesView ??= new ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>(_visibleMessages);
+
+    private IEnumerable<RemoteNotificationMessageViewModel> EnumerateVisibleMessages()
     {
-        get
+        var query = SearchQuery.Trim();
+
+        // Dedicated Claude Task page: ignore filterLabel entirely and
+        // show only the Claude Task-labeled items. Search still applies.
+        if (IsClaudeTaskVisible)
         {
-            if (_cachedVisibleMessages is not null)
-            {
-                return _cachedVisibleMessages;
-            }
-
-            var query = SearchQuery.Trim();
-
-            // Dedicated Claude Task page: ignore filterLabel entirely and
-            // show only the Claude Task-labeled items. Search still applies.
-            if (IsClaudeTaskVisible)
-            {
-                _cachedVisibleMessages = Messages
-                    .Where(message =>
-                        string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
-                        (query.Length == 0 || message.MatchesSearch(query)))
-                    .ToArray();
-                return _cachedVisibleMessages;
-            }
-
-            // Main Inbox page: hide Claude Task items — they belong to
-            // the Claude Task page. Chip filter still narrows further
-            // when the user picks a per-session label.
-            if (_filterLabel is null && query.Length == 0)
-            {
-                _cachedVisibleMessages = Messages
-                    .Where(message =>
-                        !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
-                        !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source))
-                    .ToArray();
-                return _cachedVisibleMessages;
-            }
-
-            _cachedVisibleMessages = Messages
-                .Where(message =>
-                    !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
-                    !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source) &&
-                    (_filterLabel is null || string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)) &&
-                    (query.Length == 0 || message.MatchesSearch(query)))
-                .ToArray();
-            return _cachedVisibleMessages;
+            return Messages.Where(message =>
+                string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+                (query.Length == 0 || message.MatchesSearch(query)));
         }
+
+        // Main Inbox page: hide Claude Task items — they belong to
+        // the Claude Task page. Chip filter still narrows further
+        // when the user picks a per-session label.
+        return Messages.Where(message =>
+            !string.Equals(message.Label, ClaudeTaskLabel, StringComparison.Ordinal) &&
+            !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source) &&
+            (_filterLabel is null || string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)) &&
+            (query.Length == 0 || message.MatchesSearch(query)));
     }
 
     public bool HasVisibleMessages => VisibleMessages.Count > 0;

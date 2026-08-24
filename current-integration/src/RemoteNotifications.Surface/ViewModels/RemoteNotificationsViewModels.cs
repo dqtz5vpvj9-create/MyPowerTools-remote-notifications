@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.Windows.Input;
 using Avalonia.Threading;
@@ -61,6 +62,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         KnownLabels = new ObservableCollection<string>(snapshot.KnownLabels);
         Messages = new ObservableCollection<RemoteNotificationMessageViewModel>(
             snapshot.MessagesOldestFirst.Reverse().Select(message => new RemoteNotificationMessageViewModel(message)));
+        Messages.CollectionChanged += OnMessagesCollectionChanged;
         ObserveSystemHealth(snapshot.MessagesOldestFirst);
         _seenIds = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
         foreach (var message in Messages.Reverse())
@@ -79,6 +81,54 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         _waterline = ResolveInitialWaterline(snapshot.MessagesOldestFirst);
         RebuildChips();
         NotifyMessageViewChanged();
+    }
+
+    private void OnMessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        SyncVisibleMessages();
+    }
+
+    private void SyncVisibleMessages()
+    {
+        var desired = EnumerateVisibleMessages().ToArray();
+
+        for (var index = _visibleMessages.Count - 1; index >= desired.Length; index--)
+        {
+            _visibleMessages.RemoveAt(index);
+        }
+
+        for (var index = 0; index < desired.Length; index++)
+        {
+            var wanted = desired[index];
+            if (index < _visibleMessages.Count && ReferenceEquals(_visibleMessages[index], wanted))
+            {
+                continue;
+            }
+
+            var existingIndex = -1;
+            for (var candidate = index + 1; candidate < _visibleMessages.Count; candidate++)
+            {
+                if (ReferenceEquals(_visibleMessages[candidate], wanted))
+                {
+                    existingIndex = candidate;
+                    break;
+                }
+            }
+
+            if (existingIndex >= 0)
+            {
+                _visibleMessages.Move(existingIndex, index);
+            }
+            else
+            {
+                _visibleMessages.Insert(index, wanted);
+            }
+        }
+
+        for (var index = _visibleMessages.Count - 1; index >= desired.Length; index--)
+        {
+            _visibleMessages.RemoveAt(index);
+        }
     }
 
     public Task RetryAsync()
@@ -581,18 +631,16 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
     private bool HasVisibleMessageSourcesChanged(IReadOnlyList<RemoteNotificationRecord> previous)
     {
-        _cachedVisibleMessages = null;
         return !previous.SequenceEqual(CaptureVisibleMessageSources());
     }
 
     private void NotifyMessageViewChanged(bool visibleMessagesChanged = true)
     {
-        _cachedVisibleMessages = null;
-        OnPropertyChanged(nameof(TotalCount));
         if (visibleMessagesChanged)
         {
-            OnPropertyChanged(nameof(VisibleMessages));
+            SyncVisibleMessages();
         }
+        OnPropertyChanged(nameof(TotalCount));
         OnPropertyChanged(nameof(HasVisibleMessages));
         OnPropertyChanged(nameof(ShowsEmptyOverlay));
         OnPropertyChanged(nameof(EmptyOverlayText));

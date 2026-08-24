@@ -7,6 +7,8 @@ namespace MyPowerTools.Shell.Avalonia.ViewModels;
 
 public sealed partial class RemoteNotificationsViewModel
 {
+    private readonly ObservableCollection<RemoteNotificationMessageViewModel> _visibleMessages = [];
+    private ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>? _visibleMessagesView;
     public ObservableCollection<RemoteNotificationMessageViewModel> Messages { get; }
     public ObservableCollection<string> KnownLabels { get; }
     public ObservableCollection<RemoteNotificationLabelChipViewModel> Chips { get; }
@@ -17,11 +19,17 @@ public sealed partial class RemoteNotificationsViewModel
     public string FilterLabel => _filterLabel ?? RemoteNotificationsLegacyStore.FilterAll;
     public int TotalCount => Messages.Count(message => !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source));
 
-    public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages => _filterLabel is null
-        ? Messages.Where(message => !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source)).ToArray()
-        : Messages.Where(message =>
+    /// <summary>
+    /// Stable collection bound by the inbox ListBox. Keeping the same
+    /// collection instance prevents an ItemsSource replacement on every poll.
+    /// </summary>
+    public ReadOnlyObservableCollection<RemoteNotificationMessageViewModel> VisibleMessages =>
+        _visibleMessagesView ??= new ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>(_visibleMessages);
+
+    private IEnumerable<RemoteNotificationMessageViewModel> EnumerateVisibleMessages() =>
+        Messages.Where(message =>
             !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source) &&
-            string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)).ToArray();
+            (_filterLabel is null || string.Equals(message.Label, _filterLabel, StringComparison.Ordinal)));
 
     public bool HasVisibleMessages => VisibleMessages.Count > 0;
     public bool ShowsEmptyOverlay => !HasVisibleMessages;
