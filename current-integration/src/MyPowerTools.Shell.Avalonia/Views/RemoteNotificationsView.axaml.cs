@@ -82,11 +82,22 @@ public sealed partial class RemoteNotificationsView : UserControl
 
     private void OnMessagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            QueueMessageScrollRestore();
+            return;
+        }
+
         if (e.Action != NotifyCollectionChangedAction.Add || e.NewStartingIndex != 0)
         {
             return;
         }
 
+        QueueMessageScrollRestore();
+    }
+
+    private void QueueMessageScrollRestore()
+    {
         var list = this.FindControl<ListBox>("NotificationList");
         var scroller = list?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
         if (scroller is null)
@@ -104,7 +115,7 @@ public sealed partial class RemoteNotificationsView : UserControl
         }
 
         _scrollRestoreQueued = true;
-        Dispatcher.UIThread.Post(RestoreMessageScrollAnchor, DispatcherPriority.Loaded);
+        Dispatcher.UIThread.Post(RestoreMessageScrollAnchor, DispatcherPriority.Render);
     }
 
     private void RestoreMessageScrollAnchor()

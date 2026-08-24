@@ -102,6 +102,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
                     FallbackId = RemoteNotificationsLegacyStore.FallbackId(message)
                 })
                 .ToArray();
+            var visibleBefore = CaptureVisibleMessageSources();
             var shown = 0;
             foreach (var requestedId in requestedIds)
             {
@@ -146,7 +147,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
 
             _store.SaveSeenMessageIds(_seenIds.OldestFirst);
             Shown = shown.ToString(CultureInfo.InvariantCulture);
-            NotifyMessageViewChanged();
+            NotifyMessageViewChanged(HasVisibleMessageSourcesChanged(visibleBefore));
             return shown;
         }
         finally
@@ -175,6 +176,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
                 .Where(IsSaneNotification)
                 .OrderBy(message => ParseSortTime(message.ServerTimestamp.Length > 0 ? message.ServerTimestamp : message.Timestamp))
                 .ToArray();
+            var visibleBefore = CaptureVisibleMessageSources();
             ObserveSystemHealth(saneNotifications);
             var shown = 0;
             foreach (var notification in saneNotifications)
@@ -238,7 +240,7 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
                 message.RefreshRelativeTime();
             }
 
-            NotifyMessageViewChanged();
+            NotifyMessageViewChanged(HasVisibleMessageSourcesChanged(visibleBefore));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -260,10 +262,11 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
 
     public void ClearMessages()
     {
+        var hadVisibleMessages = VisibleMessages.Count > 0;
         Messages.Clear();
         _latestSystemHealth = null;
         _store.ClearMessages();
-        NotifyMessageViewChanged();
+        NotifyMessageViewChanged(hadVisibleMessages);
     }
 
     public void AcknowledgeMessage(RemoteNotificationMessageViewModel message)
@@ -356,22 +359,70 @@ public sealed partial class RemoteNotificationsViewModel : ToolProductPageViewMo
     {
         var currentOldestFirst = Messages.Reverse().Select(message => message.Source).ToArray();
         var merged = RemoteNotificationsLegacyStore.MergeTaskCompletedRecords(currentOldestFirst);
-        if (currentOldestFirst.SequenceEqual(merged))
+        ReconcileMessages(merged.Reverse().ToArray());
+    }
+
+    private void ReconcileMessages(IReadOnlyList<RemoteNotificationRecord> desiredNewestFirst)
+    {
+        var currentNewestFirst = Messages.Select(message => message.Source).ToArray();
+        if (currentNewestFirst.SequenceEqual(desiredNewestFirst))
         {
             return;
         }
 
-        Messages.Clear();
-        foreach (var message in merged.Reverse())
+        var maximumOverlap = Math.Min(currentNewestFirst.Length, desiredNewestFirst.Count);
+        var overlap = 0;
+        for (var candidate = maximumOverlap; candidate >= 0; candidate--)
         {
-            Messages.Add(new RemoteNotificationMessageViewModel(message));
+            if (!currentNewestFirst
+                .Take(candidate)
+                .SequenceEqual(desiredNewestFirst.Skip(desiredNewestFirst.Count - candidate)))
+            {
+                continue;
+            }
+
+            overlap = candidate;
+            break;
+        }
+
+        if (overlap == 0 && currentNewestFirst.Length > 0 && desiredNewestFirst.Count > 0)
+        {
+            Messages.Clear();
+            foreach (var message in desiredNewestFirst)
+            {
+                Messages.Add(new RemoteNotificationMessageViewModel(message));
+            }
+            return;
+        }
+
+        for (var index = currentNewestFirst.Length - 1; index >= overlap; index--)
+        {
+            Messages.RemoveAt(index);
+        }
+
+        for (var index = desiredNewestFirst.Count - overlap - 1; index >= 0; index--)
+        {
+            Messages.Insert(0, new RemoteNotificationMessageViewModel(desiredNewestFirst[index]));
         }
     }
 
-    private void NotifyMessageViewChanged()
+    private RemoteNotificationRecord[] CaptureVisibleMessageSources()
+    {
+        return VisibleMessages.Select(message => message.Source).ToArray();
+    }
+
+    private bool HasVisibleMessageSourcesChanged(IReadOnlyList<RemoteNotificationRecord> previous)
+    {
+        return !previous.SequenceEqual(CaptureVisibleMessageSources());
+    }
+
+    private void NotifyMessageViewChanged(bool visibleMessagesChanged = true)
     {
         OnPropertyChanged(nameof(TotalCount));
-        OnPropertyChanged(nameof(VisibleMessages));
+        if (visibleMessagesChanged)
+        {
+            OnPropertyChanged(nameof(VisibleMessages));
+        }
         OnPropertyChanged(nameof(HasVisibleMessages));
         OnPropertyChanged(nameof(ShowsEmptyOverlay));
         OnPropertyChanged(nameof(EmptyOverlayText));

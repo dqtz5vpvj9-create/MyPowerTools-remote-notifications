@@ -26,6 +26,14 @@ _EXPLICIT_AGENT_INTERNAL_KINDS = frozenset({
     "agent_internal",
     "claude_agent_internal",
 })
+_CODEX_GOAL_OBJECTIVE_RE = re.compile(
+    r"<objective\b[^>]*>(.*?)</objective>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_CODEX_GOAL_SOURCE_RE = re.compile(
+    r"\bsource\s*=\s*(['\"])goal\1(?=\s|/?>|$)",
+    flags=re.IGNORECASE,
+)
 
 
 def _canonical_json(data):
@@ -126,6 +134,35 @@ def _clean_user_request(text: str) -> str:
         return match.group(1).strip()
     cleaned = re.sub(r"<timestamp>.*?</timestamp>", "", text, flags=re.S)
     return cleaned.strip()
+
+
+def _codex_goal_objective(text: str) -> str | None:
+    """Return the public objective from a Codex goal continuation envelope.
+
+    Codex records goal continuation prompts as role=user messages. The
+    envelope also carries continuation rules, budget details, and internal
+    instructions. Those fields belong to the runtime and must stay out of a
+    notification's quoted user request. ``None`` marks an ordinary user
+    message; an empty string marks a goal envelope with no usable objective.
+    """
+    trimmed = text.strip()
+    if not trimmed:
+        return None
+
+    open_end = trimmed.find(">")
+    if open_end < 0:
+        return None
+    opening = trimmed[: open_end + 1]
+    is_legacy = re.match(r"<goal_context(?:\s|>)", opening, flags=re.IGNORECASE)
+    is_current = (
+        re.match(r"<codex_internal_context(?:\s|>)", opening, flags=re.IGNORECASE)
+        and _CODEX_GOAL_SOURCE_RE.search(opening) is not None
+    )
+    if not (is_legacy or is_current):
+        return None
+
+    match = _CODEX_GOAL_OBJECTIVE_RE.search(trimmed)
+    return match.group(1).strip() if match else ""
 
 
 def _cursor_workspace_name(data: dict) -> str:
@@ -335,7 +372,8 @@ def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
                 continue
             text = user_text(event)
             if text:
-                return text
+                objective = _codex_goal_objective(text)
+                return objective if objective is not None else text
         return ""
 
     try:
@@ -362,7 +400,8 @@ def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
                     continue
                 text = user_text(event)
                 if text:
-                    last = text
+                    objective = _codex_goal_objective(text)
+                    last = objective if objective is not None else text
         return last
     except OSError:
         return ""
@@ -689,7 +728,12 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
                 request = _last_role_text(_cursor_transcript_lines(data), {"user", "user/message"})
         elif client == "cursor":
             request = _last_role_text(_cursor_transcript_lines(data), {"user", "user/message"})
-    request = _clean_user_request(str(request).strip())
+    request = str(request).strip()
+    if client == "codex":
+        objective = _codex_goal_objective(request)
+        if objective is not None:
+            request = objective
+    request = _clean_user_request(request)
     if request and not claude_task:
         quote = _quote_request(request)
         body = f"{quote}\n\n[{label}] {last_msg or 'Task completed'}"
