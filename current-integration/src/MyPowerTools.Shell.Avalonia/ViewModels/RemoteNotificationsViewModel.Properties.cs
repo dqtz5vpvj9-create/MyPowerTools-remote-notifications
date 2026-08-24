@@ -23,7 +23,7 @@ public sealed partial class RemoteNotificationsViewModel
     /// Stable collection bound by the inbox ListBox. Keeping the same
     /// collection instance prevents an ItemsSource replacement on every poll.
     /// </summary>
-    public ReadOnlyObservableCollection<RemoteNotificationMessageViewModel> VisibleMessages =>
+    public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages =>
         _visibleMessagesView ??= new ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>(_visibleMessages);
 
     private IEnumerable<RemoteNotificationMessageViewModel> EnumerateVisibleMessages() =>

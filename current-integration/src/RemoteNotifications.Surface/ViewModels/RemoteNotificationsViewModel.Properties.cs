@@ -37,7 +37,7 @@ public sealed partial class RemoteNotificationsViewModel
     /// unchanged while records arrive, so Avalonia can apply collection
     /// changes without replacing the ItemsSource and losing the scroll anchor.
     /// </summary>
-    public ReadOnlyObservableCollection<RemoteNotificationMessageViewModel> VisibleMessages =>
+    public IReadOnlyList<RemoteNotificationMessageViewModel> VisibleMessages =>
         _visibleMessagesView ??= new ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>(_visibleMessages);
 
     private IEnumerable<RemoteNotificationMessageViewModel> EnumerateVisibleMessages()
