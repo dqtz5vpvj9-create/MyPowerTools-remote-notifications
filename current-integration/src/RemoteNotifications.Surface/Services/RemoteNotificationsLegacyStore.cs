@@ -732,8 +732,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     /// </summary>
     public static bool IsHistoricalCodexInternalCallback(RemoteNotificationRecord message)
     {
-        return string.Equals(message.SourceClient?.Trim(), "codex", StringComparison.OrdinalIgnoreCase) &&
-               (message.Message?.Contains(CodexCampaignCallbackMarker, StringComparison.Ordinal) ?? false);
+        return message.Message?.Contains(CodexCampaignCallbackMarker, StringComparison.Ordinal) ?? false;
     }
 
     private static string AppendTaskCompleted(string message)
