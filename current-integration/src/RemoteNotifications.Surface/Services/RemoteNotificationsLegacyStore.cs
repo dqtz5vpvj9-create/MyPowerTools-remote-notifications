@@ -110,6 +110,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     public const int MaximumRecentHashes = 200;
     public const int MaximumSeenMessageIds = 5000;
     public const int ClaudeDuplicateWindowMinutes = 15;
+    public const string CodexCampaignCallbackMarker = "[AutoDroid Campaign callback subagent]";
 
     // Exact source identities confirmed from Claude's explicit task-notification
     // ancestry.  This one-time compatibility set repairs records written before
@@ -593,7 +594,8 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         foreach (var message in CollapseClaudeStopDuplicates(messagesOldestFirst))
         {
             if (IsInternalAgentCommunication(message) ||
-                IsHistoricalClaudeInternalEvent(message))
+                IsHistoricalClaudeInternalEvent(message) ||
+                IsHistoricalCodexInternalCallback(message))
             {
                 continue;
             }
@@ -721,6 +723,17 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     {
         return string.Equals(message.SourceClient?.Trim(), "claude", StringComparison.OrdinalIgnoreCase) &&
                HistoricalClaudeInternalEventIds.Contains(message.SourceEventId?.Trim() ?? "");
+    }
+
+    /// <summary>
+    /// Identifies the provider-authored marker carried by historical Codex
+    /// campaign callback rollouts that reached clients before sender-side
+    /// thread-source filtering was deployed.
+    /// </summary>
+    public static bool IsHistoricalCodexInternalCallback(RemoteNotificationRecord message)
+    {
+        return string.Equals(message.SourceClient?.Trim(), "codex", StringComparison.OrdinalIgnoreCase) &&
+               (message.Message?.Contains(CodexCampaignCallbackMarker, StringComparison.Ordinal) ?? false);
     }
 
     private static string AppendTaskCompleted(string message)

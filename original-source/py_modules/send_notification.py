@@ -26,6 +26,10 @@ _EXPLICIT_AGENT_INTERNAL_KINDS = frozenset({
     "agent_internal",
     "claude_agent_internal",
 })
+_CODEX_INTERNAL_THREAD_SOURCES = frozenset({
+    "subagent",
+    "campaign_callback",
+})
 _CODEX_GOAL_OBJECTIVE_RE = re.compile(
     r"<objective\b[^>]*>(.*?)</objective>",
     flags=re.IGNORECASE | re.DOTALL,
@@ -335,6 +339,52 @@ def _codex_thread_name(session_id: str) -> str:
 
 def _codex_home() -> str:
     return os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+
+
+def _codex_source_is_subagent(source: object) -> bool:
+    """Recognize both legacy and current Codex subagent source metadata."""
+    if isinstance(source, str):
+        return source.strip().lower() == "subagent"
+    if not isinstance(source, dict):
+        return False
+    return "subagent" in source
+
+
+def _codex_rollout_session_meta(transcript_path: str) -> dict:
+    """Read the authoritative session_meta payload at the head of a rollout."""
+    if not transcript_path:
+        return {}
+    try:
+        with open(transcript_path, encoding="utf-8", errors="replace") as fh:
+            first_line = fh.readline(4 * 1024 * 1024)
+        event = json.loads(first_line)
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(event, dict) or event.get("type") != "session_meta":
+        return {}
+    payload = event.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def is_codex_internal_thread(data: dict) -> bool:
+    """Return true when Codex identifies a rollout as an internal child thread.
+
+    Codex Stop payloads point at the exact rollout through ``transcript_path``.
+    Subagents use ``thread_source=subagent`` and, depending on the Codex version,
+    either ``source=subagent`` or a structured ``source.subagent`` object.
+    Campaign callbacks use ``thread_source=campaign_callback``. Both are
+    provider-declared internal work whose parent task owns the user-visible
+    completion. Missing metadata fails open so ordinary task notifications
+    remain deliverable.
+    """
+    candidates = [data, _codex_rollout_session_meta(str(data.get("transcript_path") or ""))]
+    for candidate in candidates:
+        thread_source = str(candidate.get("thread_source") or "").strip().lower()
+        if thread_source in _CODEX_INTERNAL_THREAD_SOURCES:
+            return True
+        if _codex_source_is_subagent(candidate.get("source")):
+            return True
+    return False
 
 
 def _codex_last_user_message(session_id: str, transcript_path: str = "") -> str:
@@ -861,6 +911,11 @@ def main():
 
         if _is_cursor_payload(data):
             client = "cursor"
+
+        if client == "codex" and is_codex_internal_thread(data):
+            # A parent task owns the user-visible completion. Subagent Stop
+            # hooks are internal coordination and can arrive in large bursts.
+            return
 
         if hook == 'stop' and client == "claude":
             claude_claim = claim_claude_stop(data)

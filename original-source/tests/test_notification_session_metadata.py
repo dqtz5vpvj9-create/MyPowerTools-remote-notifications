@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -333,6 +334,99 @@ def test_codex_stop_message_quotes_user_request(tmp_path, monkeypatch):
     message = module.format_stop_message(payload, "codex")
     assert "> 把全文发给我" in message
     assert "这是回复" in message
+
+
+def _write_codex_session_meta(path, payload):
+    path.write_text(json.dumps({
+        "type": "session_meta",
+        "payload": payload,
+    }) + "\n", encoding="utf-8")
+
+
+def test_codex_subagent_classifier_accepts_current_nested_source(tmp_path):
+    transcript = tmp_path / "codex-subagent.jsonl"
+    _write_codex_session_meta(transcript, {
+        "thread_source": "subagent",
+        "source": {"subagent": {"thread_spawn": {
+            "parent_thread_id": "parent-1",
+            "depth": 1,
+            "agent_path": "/root/review",
+        }}},
+    })
+    module = load_send_module()
+
+    assert module.is_codex_internal_thread({"transcript_path": str(transcript)}) is True
+
+
+def test_codex_subagent_classifier_accepts_legacy_and_guardian_sources(tmp_path):
+    module = load_send_module()
+    legacy = tmp_path / "legacy-subagent.jsonl"
+    guardian = tmp_path / "guardian-subagent.jsonl"
+    _write_codex_session_meta(legacy, {"source": "subagent"})
+    _write_codex_session_meta(guardian, {
+        "thread_source": "subagent",
+        "source": {"subagent": {"other": "guardian"}},
+    })
+
+    assert module.is_codex_internal_thread({"transcript_path": str(legacy)}) is True
+    assert module.is_codex_internal_thread({"transcript_path": str(guardian)}) is True
+
+
+def test_codex_subagent_classifier_keeps_top_level_and_unreadable_rollouts(tmp_path):
+    module = load_send_module()
+    top_level = tmp_path / "top-level.jsonl"
+    broken = tmp_path / "broken.jsonl"
+    _write_codex_session_meta(top_level, {
+        "thread_source": "user",
+        "source": "vscode",
+    })
+    broken.write_text("{broken", encoding="utf-8")
+
+    assert module.is_codex_internal_thread({"transcript_path": str(top_level)}) is False
+    assert module.is_codex_internal_thread({"transcript_path": str(broken)}) is False
+    assert module.is_codex_internal_thread({"transcript_path": str(tmp_path / "missing.jsonl")}) is False
+
+
+def test_codex_subagent_classifier_accepts_explicit_hook_metadata():
+    module = load_send_module()
+
+    assert module.is_codex_internal_thread({"thread_source": "subagent"}) is True
+    assert module.is_codex_internal_thread({"source": {"subagent": {"other": "guardian"}}}) is True
+
+
+def test_codex_internal_classifier_accepts_campaign_callback(tmp_path):
+    transcript = tmp_path / "codex-campaign-callback.jsonl"
+    _write_codex_session_meta(transcript, {
+        "thread_source": "campaign_callback",
+        "source": "exec",
+    })
+    module = load_send_module()
+
+    assert module.is_codex_internal_thread({"transcript_path": str(transcript)}) is True
+    assert module.is_codex_internal_thread({"thread_source": "campaign_callback"}) is True
+
+
+def test_codex_subagent_main_returns_before_message_formatting(tmp_path, monkeypatch):
+    transcript = tmp_path / "codex-subagent-main.jsonl"
+    _write_codex_session_meta(transcript, {
+        "thread_source": "subagent",
+        "source": {"subagent": {"thread_spawn": {"depth": 1}}},
+    })
+    module = load_send_module()
+    payload = json.dumps({
+        "session_id": "root-session",
+        "transcript_path": str(transcript),
+        "hook_event_name": "Stop",
+        "last_assistant_message": "must stay internal",
+    })
+    monkeypatch.setattr(sys, "argv", [
+        "send_notification.py", "--stdin", "--hook", "stop",
+        "--client", "codex", "--icon", "codex",
+    ])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+    monkeypatch.setattr(module, "format_stop_message", lambda *_args: 1 / 0)
+
+    module.main()
 
 
 def test_codex_goal_stop_message_quotes_only_objective(tmp_path):
