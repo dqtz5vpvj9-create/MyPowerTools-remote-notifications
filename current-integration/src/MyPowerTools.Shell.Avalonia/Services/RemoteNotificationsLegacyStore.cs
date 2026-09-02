@@ -105,6 +105,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     public const string DefaultChannel = "default";
     public const string FilterAll = "__all__";
     public const string TaskCompletedText = "Task completed";
+    public const string QuotedRequestReferenceHeading = "For reference";
     public const int MaximumMessages = 500;
     public const int MaximumRecentHashes = 200;
     public const int MaximumSeenMessageIds = 5000;
@@ -445,14 +446,15 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     private static string AppendTaskCompleted(string message)
     {
-        var trimmed = (message ?? "").TrimEnd();
-        if (trimmed.Length == 0 ||
-            trimmed.EndsWith(TaskCompletedText, StringComparison.OrdinalIgnoreCase))
+        var parts = SplitQuotedRequest(message);
+        var reply = parts.ReplyBody.TrimEnd();
+        if (reply.Length == 0 ||
+            reply.EndsWith(TaskCompletedText, StringComparison.OrdinalIgnoreCase))
         {
-            return trimmed;
+            return AttachQuotedRequest(reply, parts.QuotedRequest);
         }
 
-        return $"{trimmed}\n\n{TaskCompletedText}";
+        return AttachQuotedRequest($"{reply}\n\n{TaskCompletedText}", parts.QuotedRequest);
     }
 
     private static bool TryClaudeDuplicateKey(RemoteNotificationRecord message, out string key)
@@ -495,43 +497,145 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     /// <summary>
     /// Inbox messages may quote the user request as a leading <c>&gt; ...</c>
-    /// block. OS banners should show the <c>[label] result</c> that follows,
-    /// not the question.
+    /// block, or as a trailing "For reference" appendix. OS banners should
+    /// show the <c>[label] result</c>, not the question.
     /// </summary>
-    public static string StripLeadingQuotedRequest(string message)
+    public static string StripLeadingQuotedRequest(string message) =>
+        SplitQuotedRequest(message).ReplyBody;
+
+    public readonly record struct QuotedRequestParts(string ReplyBody, string QuotedRequest);
+
+    public static QuotedRequestParts SplitQuotedRequest(string message)
     {
         if (string.IsNullOrEmpty(message))
         {
-            return message ?? "";
+            return new QuotedRequestParts(message ?? "", "");
         }
 
         var lines = message.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var bodyStart = 0;
+        var leadingQuote = "";
         var index = 0;
         while (index < lines.Length && IsMarkdownQuoteLine(lines[index]))
         {
             index++;
         }
 
-        if (index == 0)
+        if (index > 0)
         {
-            return message;
+            var afterQuotes = index;
+            while (afterQuotes < lines.Length && string.IsNullOrWhiteSpace(lines[afterQuotes]))
+            {
+                afterQuotes++;
+            }
+
+            var remainder = string.Join('\n', lines.Skip(afterQuotes));
+            if (!string.Equals(ExtractLabel(remainder), "(unlabeled)", StringComparison.Ordinal))
+            {
+                leadingQuote = string.Join('\n', lines.Take(index)).TrimEnd();
+                bodyStart = afterQuotes;
+            }
         }
 
-        while (index < lines.Length && string.IsNullOrWhiteSpace(lines[index]))
+        var bodyLines = lines[bodyStart..];
+        var (replyLines, trailingQuote) = SplitTrailingReferenceAppendix(bodyLines);
+        var reply = string.Join('\n', replyLines).TrimEnd();
+        var quote = trailingQuote.Length > 0 ? trailingQuote : leadingQuote;
+        return new QuotedRequestParts(reply, quote);
+    }
+
+    public static string AttachQuotedRequest(string replyBody, string quotedRequest)
+    {
+        var body = (replyBody ?? "").TrimEnd();
+        var quote = (quotedRequest ?? "").Trim();
+        if (quote.Length == 0)
         {
-            index++;
+            return body;
         }
 
-        var remainder = string.Join('\n', lines.Skip(index));
-        return string.Equals(ExtractLabel(remainder), "(unlabeled)", StringComparison.Ordinal)
-            ? message
-            : remainder;
+        return $"{body}\n\n---\n\n{QuotedRequestReferenceHeading}:\n\n{quote}";
+    }
+
+    private static (string[] ReplyLines, string TrailingQuote) SplitTrailingReferenceAppendix(string[] lines)
+    {
+        var end = lines.Length;
+        while (end > 0 && string.IsNullOrWhiteSpace(lines[end - 1]))
+        {
+            end--;
+        }
+
+        var quoteEnd = end;
+        var quoteStart = end;
+        while (quoteStart > 0 && IsMarkdownQuoteLine(lines[quoteStart - 1]))
+        {
+            quoteStart--;
+        }
+
+        if (quoteStart == quoteEnd)
+        {
+            return (lines, "");
+        }
+
+        var beforeQuotes = quoteStart;
+        while (beforeQuotes > 0 && string.IsNullOrWhiteSpace(lines[beforeQuotes - 1]))
+        {
+            beforeQuotes--;
+        }
+
+        if (beforeQuotes == 0 || !IsReferenceHeading(lines[beforeQuotes - 1]))
+        {
+            return (lines, "");
+        }
+
+        var cut = beforeQuotes - 1;
+        while (cut > 0 && string.IsNullOrWhiteSpace(lines[cut - 1]))
+        {
+            cut--;
+        }
+
+        if (cut > 0 && IsHorizontalRule(lines[cut - 1]))
+        {
+            cut--;
+            while (cut > 0 && string.IsNullOrWhiteSpace(lines[cut - 1]))
+            {
+                cut--;
+            }
+        }
+
+        return (lines[..cut], string.Join('\n', lines[quoteStart..quoteEnd]).TrimEnd());
     }
 
     private static bool IsMarkdownQuoteLine(string line)
     {
         var trimmed = line.TrimStart();
         return trimmed.StartsWith('>');
+    }
+
+    private static bool IsHorizontalRule(string line)
+    {
+        var trimmed = line.Trim();
+        return trimmed.Length >= 3 &&
+               (trimmed.All(character => character == '-') ||
+                trimmed.All(character => character == '*') ||
+                trimmed.All(character => character == '_'));
+    }
+
+    private static bool IsReferenceHeading(string line)
+    {
+        var trimmed = line.Trim();
+        while (trimmed.StartsWith('#'))
+        {
+            trimmed = trimmed[1..].TrimStart();
+        }
+
+        trimmed = trimmed.Trim('*', '_').Trim();
+        if (trimmed.EndsWith(':') || trimmed.EndsWith('：'))
+        {
+            trimmed = trimmed[..^1].TrimEnd();
+        }
+
+        return trimmed.Equals(QuotedRequestReferenceHeading, StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Equals("原文仅供参考", StringComparison.Ordinal);
     }
 
     public static string StableId(RemoteNotificationRecord message)

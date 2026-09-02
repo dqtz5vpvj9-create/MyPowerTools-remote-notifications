@@ -95,7 +95,7 @@
                        Classes="MptMeta"
                        TextWrapping="Wrap"
                        IsVisible="False" />
-            <SelectableTextBlock Text="{Binding Message}"
+            <SelectableTextBlock Text="{Binding DisplayMessage}"
                                  TextWrapping="Wrap" />
           </StackPanel>
         </ScrollViewer>
