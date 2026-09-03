@@ -9,7 +9,7 @@ using System.Threading.Channels;
 using MyPowerTools.Protocol;
 using MyPowerTools.Abstractions;
 using MyPowerTools.RemoteNotifications.Configuration;
-using MyPowerTools.Shell.Avalonia.Services;
+using RemoteNotifications.Surface.Services;
 
 namespace AndroidTools.MyPowerTools;
 

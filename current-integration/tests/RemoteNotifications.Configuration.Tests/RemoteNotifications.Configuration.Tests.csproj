@@ -16,11 +16,20 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
-    <Compile Include="..\..\src\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationSettingsStore.cs"
+    <!--
+      These are the files RemoteNotifications.Surface actually ships. Compile the
+      shipped sources directly so the suite never drifts onto a private copy, and
+      keep the list to the services that carry no Avalonia dependency.
+    -->
+    <Compile Include="..\..\src\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
              Link="Product\RemoteNotificationSettingsStore.cs" />
-    <Compile Include="..\..\src\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationsLegacyStore.cs"
+    <Compile Include="..\..\src\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
              Link="Product\RemoteNotificationsLegacyStore.cs" />
-    <Compile Include="..\..\src\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationHttpPoller.cs"
+    <Compile Include="..\..\src\RemoteNotifications.Surface\Services\RemoteNotificationHttpPoller.cs"
              Link="Product\RemoteNotificationHttpPoller.cs" />
+    <Compile Include="..\..\src\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
+             Link="Product\RemoteNotificationSeenIdRing.cs" />
+    <Compile Include="..\..\src\RemoteNotifications.Surface\Services\RemoteNotificationSessionChain.cs"
+             Link="Product\RemoteNotificationSessionChain.cs" />
   </ItemGroup>
 </Project>

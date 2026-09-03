@@ -169,7 +169,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                     var before = state.Messages;
                     var beforeSeen = state.SeenMessageIds.ToArray();
                     state.Messages = CleanupClaudeStopNoise(state.Messages).ToList();
-                    state.SeenMessageIds = SeenIdsForMessages(state.Messages);
+                    state.SeenMessageIds = MergeSeenIds(state.SeenMessageIds, state.Messages);
                     if (!state.Messages.SequenceEqual(before) ||
                         !state.SeenMessageIds.SequenceEqual(beforeSeen))
                     {
@@ -194,7 +194,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 {
                     MessagesOldestFirst = cleanedMessages,
                     KnownLabels = cleanedLabels,
-                    SeenMessageIds = SeenIdsForMessages(cleanedMessages)
+                    SeenMessageIds = MergeSeenIds(imported.SeenMessageIds ?? [], cleanedMessages)
                 };
                 WriteFileStateUnsafe(FromSnapshot(cleaned));
                 return cleaned;
@@ -271,7 +271,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                 state.Messages = CleanupClaudeStopNoise(messagesOldestFirst)
                     .TakeLast(MaximumMessages)
                     .ToList();
-                state.SeenMessageIds = SeenIdsForMessages(state.Messages);
+                state.SeenMessageIds = MergeSeenIds(state.SeenMessageIds, state.Messages);
                 WriteFileStateUnsafe(state);
             });
             return;
@@ -501,13 +501,29 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             .ToList()
     };
 
-    private static List<string> SeenIdsForMessages(IEnumerable<RemoteNotificationRecord> messages) =>
-        messages
-            .SelectMany(message => new[] { StableId(message), FallbackId(message) })
+    /// <summary>
+    /// Extends the persisted seen-id ring with the ids of the retained
+    /// messages. Ids that were already remembered stay in the ring even when
+    /// their message was merged, filtered or trimmed out of the visible
+    /// history, so those records never toast a second time.
+    /// </summary>
+    private static List<string> MergeSeenIds(
+        IEnumerable<string> knownMessageIds,
+        IEnumerable<RemoteNotificationRecord> messages)
+    {
+        var seen = knownMessageIds
             .Where(messageId => !string.IsNullOrWhiteSpace(messageId))
             .Distinct(StringComparer.Ordinal)
             .TakeLast(MaximumSeenMessageIds)
             .ToList();
+        foreach (var message in messages)
+        {
+            Remember(seen, StableId(message), MaximumSeenMessageIds);
+            Remember(seen, FallbackId(message), MaximumSeenMessageIds);
+        }
+
+        return seen;
+    }
 
     private static RemoteNotificationsSnapshot ToSnapshot(PersistedState state, bool persistent)
     {

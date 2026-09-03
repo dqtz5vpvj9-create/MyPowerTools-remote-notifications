@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using MyPowerTools.RemoteNotifications.Configuration;
-using MyPowerTools.Shell.Avalonia.Services;
+using RemoteNotifications.Surface.Services;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Utilities;
 using Org.BouncyCastle.Utilities.IO.Pem;

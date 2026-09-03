@@ -6,11 +6,11 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
              Link="Configuration\RemoteNotificationSettingsStore.cs" />
-    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationHttpPoller.cs"
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationHttpPoller.cs"
              Link="RemoteNotifications\RemoteNotificationHttpPoller.cs" />
-    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationsLegacyStore.cs"
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
              Link="RemoteNotifications\RemoteNotificationsLegacyStore.cs" />
-    <Compile Include="..\MyPowerTools.Shell.Avalonia\Services\RemoteNotificationSeenIdRing.cs"
+    <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
              Link="RemoteNotifications\RemoteNotificationSeenIdRing.cs" />
   </ItemGroup>
 

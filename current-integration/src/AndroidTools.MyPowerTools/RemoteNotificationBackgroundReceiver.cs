@@ -1,6 +1,6 @@
 using System.Globalization;
 using MyPowerTools.RemoteNotifications.Configuration;
-using MyPowerTools.Shell.Avalonia.Services;
+using RemoteNotifications.Surface.Services;
 
 namespace AndroidTools.MyPowerTools;
 

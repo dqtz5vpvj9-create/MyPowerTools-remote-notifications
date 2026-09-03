@@ -1,19 +1,16 @@
 using System.Net;
 using System.Text;
-using MyPowerTools.Shell.Avalonia.Services;
-using Org.BouncyCastle.Crypto.Parameters;
+using RemoteNotifications.Surface.Services;
 using Org.BouncyCastle.Crypto.Signers;
-using Org.BouncyCastle.Crypto.Utilities;
-using Org.BouncyCastle.Utilities.IO.Pem;
 
-namespace MyPowerTools.Tests;
+namespace RemoteNotifications.Configuration.Tests;
 
 public sealed class RemoteNotificationHttpPollerTests
 {
     [Fact]
     public void Dotnet_signer_preserves_the_original_ed25519_hello_protocol()
     {
-        using var fixture = OpenSshKeyFixture.Create();
+        using var fixture = TestSigningKey.Create();
 
         var encodedSignature = RemoteNotificationSshSigner.SignHandshake(fixture.Path);
         var signature = DecodeUrlSafeBase64(encodedSignature);
@@ -30,8 +27,8 @@ public sealed class RemoteNotificationHttpPollerTests
     [Fact]
     public async Task Dotnet_poller_sends_the_signed_pull_contract_and_maps_notifications()
     {
-        using var fixture = OpenSshKeyFixture.Create();
-        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        using var fixture = TestSigningKey.Create();
+        var handler = new RecordingHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """
@@ -74,8 +71,11 @@ public sealed class RemoteNotificationHttpPollerTests
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Get, request.Method);
         Assert.Equal("/pull", request.RequestUri!.AbsolutePath);
-        Assert.Contains("MyPowerTools/RemoteNotifications", request.Headers.UserAgent.ToString(), StringComparison.Ordinal);
-        var query = ParseQuery(request.RequestUri);
+        Assert.Contains(
+            "MyPowerTools/RemoteNotifications",
+            request.Headers.UserAgent.ToString(),
+            StringComparison.Ordinal);
+        var query = TestQuery.Parse(request.RequestUri);
         Assert.Equal("default", query["channel"]);
         Assert.Equal("20", query["limit"]);
         Assert.Equal("2026-07-10T23:59:00Z", query["since"]);
@@ -90,8 +90,8 @@ public sealed class RemoteNotificationHttpPollerTests
     [Fact]
     public async Task Dotnet_poller_reports_auth_and_missing_key_failures_without_external_processes()
     {
-        using var fixture = OpenSshKeyFixture.Create();
-        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        using var fixture = TestSigningKey.Create();
+        var handler = new RecordingHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
         {
             Content = new StringContent("denied sig=should-not-leak")
         });
@@ -117,32 +117,14 @@ public sealed class RemoteNotificationHttpPollerTests
     }
 
     [Fact]
-    public void Shell_runtime_declares_the_managed_crypto_dependency_and_has_no_python_poller()
+    public void Surface_declares_the_managed_crypto_dependency_and_has_no_python_poller()
     {
-        var root = FindRepositoryRoot();
-        var project = File.ReadAllText(Path.Combine(
-            root,
-            "src",
-            "MyPowerTools.Shell.Avalonia",
-            "MyPowerTools.Shell.Avalonia.csproj"));
-        var legacyStore = File.ReadAllText(Path.Combine(
-            root,
-            "tools",
-            "remote-notifications",
-            "current-integration",
-            "src",
-            "MyPowerTools.Shell.Avalonia",
-            "Services",
-            "RemoteNotificationsLegacyStore.cs"));
-        var poller = File.ReadAllText(Path.Combine(
-            root,
-            "tools",
-            "remote-notifications",
-            "current-integration",
-            "src",
-            "MyPowerTools.Shell.Avalonia",
-            "Services",
-            "RemoteNotificationHttpPoller.cs"));
+        var project = File.ReadAllText(
+            Path.Combine(TestPaths.SurfaceRoot, "RemoteNotifications.Surface.csproj"));
+        var legacyStore = File.ReadAllText(
+            Path.Combine(TestPaths.SurfaceRoot, "Services", "RemoteNotificationsLegacyStore.cs"));
+        var poller = File.ReadAllText(
+            Path.Combine(TestPaths.SurfaceRoot, "Services", "RemoteNotificationHttpPoller.cs"));
 
         Assert.Contains("BouncyCastle.Cryptography", project, StringComparison.Ordinal);
         Assert.DoesNotContain("RemoteNotificationPythonPoller", legacyStore, StringComparison.Ordinal);
@@ -152,90 +134,8 @@ public sealed class RemoteNotificationHttpPollerTests
         Assert.DoesNotContain("python", poller, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static Dictionary<string, string> ParseQuery(Uri uri)
-    {
-        return uri.Query
-            .TrimStart('?')
-            .Split('&', StringSplitOptions.RemoveEmptyEntries)
-            .Select(part => part.Split('=', 2))
-            .ToDictionary(
-                part => Uri.UnescapeDataString(part[0]),
-                part => Uri.UnescapeDataString(part.Length == 2 ? part[1] : ""),
-                StringComparer.Ordinal);
-    }
-
     private static byte[] DecodeUrlSafeBase64(string value)
     {
         return Convert.FromBase64String(value.Replace('-', '+').Replace('_', '/'));
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
-        {
-            if (File.Exists(Path.Combine(current.FullName, "MyPowerTools.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new DirectoryNotFoundException("MyPowerTools repository root was not found.");
-    }
-
-    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
-    {
-        public List<HttpRequestMessage> Requests { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return Task.FromResult(respond(request));
-        }
-    }
-
-    private sealed class OpenSshKeyFixture : IDisposable
-    {
-        private OpenSshKeyFixture(string path, Ed25519PrivateKeyParameters privateKey)
-        {
-            Path = path;
-            PrivateKey = privateKey;
-        }
-
-        public string Path { get; }
-        public Ed25519PrivateKeyParameters PrivateKey { get; }
-
-        public static OpenSshKeyFixture Create()
-        {
-            var directory = System.IO.Path.Combine(
-                System.IO.Path.GetTempPath(),
-                "mpt-remote-notification-key",
-                Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(directory);
-            var path = System.IO.Path.Combine(directory, "id_ed25519");
-            var seed = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
-            var privateKey = new Ed25519PrivateKeyParameters(seed);
-            var keyBlob = OpenSshPrivateKeyUtilities.EncodePrivateKey(privateKey);
-            using (var writer = File.CreateText(path))
-            using (var pemWriter = new PemWriter(writer))
-            {
-                pemWriter.WriteObject(new PemObject("OPENSSH PRIVATE KEY", keyBlob));
-            }
-
-            return new OpenSshKeyFixture(path, privateKey);
-        }
-
-        public void Dispose()
-        {
-            var directory = System.IO.Path.GetDirectoryName(Path);
-            if (directory is not null && Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-        }
     }
 }
