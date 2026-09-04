@@ -75,15 +75,18 @@ public sealed class RemoteNotificationsMacProductionContractTests
     }
 
     [Fact]
-    public void Worker_enforces_single_instance_and_owner_only_unix_objects()
+    public void Worker_enforces_single_instance_and_owner_only_unix_objects_without_blocking_activation()
     {
         var source = File.ReadAllText(
             Path.Combine(ServiceRoot, "RemoteNotificationsProcessSecurity.cs"));
 
         Assert.Contains("[ModuleInitializer]", source, StringComparison.Ordinal);
+        Assert.Contains("ToolActivationProtocol.ArgumentName", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyActivationArgument", source, StringComparison.Ordinal);
         Assert.Contains("FileShare.None", source, StringComparison.Ordinal);
         Assert.Contains("remote-notifications.service.lock", source, StringComparison.Ordinal);
-        Assert.Contains("Umask(OwnerOnlyMask)", source, StringComparison.Ordinal);
+        Assert.Contains("MacUmask(OwnerOnlyMask)", source, StringComparison.Ordinal);
+        Assert.Contains("LinuxUmask(OwnerOnlyMask)", source, StringComparison.Ordinal);
         Assert.Contains("UnixFileMode.UserRead | UnixFileMode.UserWrite", source, StringComparison.Ordinal);
         Assert.Contains("Another Remote Notifications worker already owns", source, StringComparison.Ordinal);
     }
