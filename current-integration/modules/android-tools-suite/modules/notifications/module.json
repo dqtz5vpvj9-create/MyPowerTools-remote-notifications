@@ -8,24 +8,9 @@
   "entrypoints": [
     {
       "kind": "inproc-dotnet",
-      "priority": 95,
-      "assembly": "../../AndroidTools.MyPowerTools.dll",
-      "type": "AndroidTools.MyPowerTools.AndroidToolsNotificationsModule"
-    },
-    {
-      "kind": "package-runtime",
       "priority": 100,
-      "runtimeId": "module-host",
-      "service": "android_tools.notifications.v1.NotificationsModule"
-    },
-    {
-      "kind": "jsonrpc-stdio",
-      "priority": 10,
-      "compat": true,
-      "command": "python",
-      "args": [
-        "compat/notifications/module_server.py"
-      ]
+      "assembly": "../../AndroidTools.MyPowerTools.dll",
+      "type": "AndroidTools.MyPowerTools.RemoteNotificationsServiceObserverModule"
     }
   ],
   "capabilities": [
@@ -38,8 +23,8 @@
     "detailPage"
   ],
   "runtimePolicy": {
-    "preferred": "sidecar",
-    "allowInProc": false,
+    "preferred": "inproc",
+    "allowInProc": true,
     "inProcRules": {
       "maxCallMs": 3000,
       "allowNativeDll": false,
@@ -58,7 +43,7 @@
       "status": "inproc-or-sidecar",
       "settings": "inproc-or-sidecar",
       "commandProvider": "inproc-or-sidecar",
-      "longRunningCommand": "sidecar-required",
+      "longRunningCommand": "inproc-or-sidecar",
       "systemMutation": "broker-required",
       "nativeHardware": "sidecar-required",
       "elevatedWrite": "broker-required",
@@ -66,6 +51,11 @@
     }
   },
   "requires": [
+    {
+      "capability": "service.user",
+      "required": true,
+      "reason": "启动和监督 Remote Notifications 后台服务"
+    },
     {
       "capability": "notification.desktop",
       "required": false,
