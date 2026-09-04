@@ -84,7 +84,8 @@
                    ToolTip.Tip="{Binding Subtitle}" />
       </StackPanel>
 
-      <Expander Grid.Column="1"
+      <Expander x:Name="ConnectionExpander"
+                Grid.Column="1"
                 FontSize="{DynamicResource MptFontSizeMeta}"
                 HorizontalContentAlignment="Stretch"
                 ToolTip.Tip="Expand connection details"
@@ -149,7 +150,8 @@
           </Grid>
       </Expander>
 
-      <StackPanel Grid.Column="2"
+      <StackPanel x:Name="HeaderActions"
+                  Grid.Column="2"
                   Orientation="Horizontal"
                   Spacing="14"
                   VerticalAlignment="Center">
@@ -191,6 +193,13 @@
                             VerticalAlignment="Center" />
       </Grid>
       </StackPanel>
+      <controls:MptButton x:Name="OverflowMenuButton"
+                          Grid.Column="2"
+                          Content="☰"
+                          Click="OnOverflowMenuClick"
+                          ToolTip.Tip="Open notification actions"
+                          IsVisible="False"
+                          VerticalAlignment="Center" />
     </Grid>
 
     <Border Grid.Row="1"
