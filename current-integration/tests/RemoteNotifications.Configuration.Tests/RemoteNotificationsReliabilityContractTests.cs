@@ -66,4 +66,19 @@ public sealed class RemoteNotificationsReliabilityContractTests
         Assert.Contains("new RemoteNotificationsLegacyStore(_settingsStore, _sharedDataDirectory)", observer, StringComparison.Ordinal);
         Assert.Contains("[\"dataDirectory\"] = _sharedDataDirectory", observer, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Observer_status_probes_finish_inside_the_bounded_event_window()
+    {
+        var control = File.ReadAllText(Path.Combine(
+            TestPaths.IntegrationRoot,
+            "src",
+            "AndroidTools.MyPowerTools",
+            "RemoteNotificationServiceControl.cs"));
+
+        Assert.Contains("StatusProbeTimeout = TimeSpan.FromMilliseconds(500)", control, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(command, \"state\"", control, StringComparison.Ordinal);
+        Assert.Contains("? StatusProbeTimeout", control, StringComparison.Ordinal);
+        Assert.Contains(": CommandTimeout", control, StringComparison.Ordinal);
+    }
 }
