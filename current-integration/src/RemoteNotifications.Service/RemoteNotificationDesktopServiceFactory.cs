@@ -13,9 +13,8 @@ internal sealed record RemoteNotificationDeliverySnapshot(
 
 /// <summary>
 /// Creates the desktop notification publisher used by the background worker and records
-/// delivery diagnostics returned by the control socket. Production macOS uses
-/// UserNotifications. CI may select the recording provider to exercise the complete polling
-/// and persistence path without requiring an interactive Notification Center session.
+/// delivery diagnostics returned by the control socket. Production macOS always uses
+/// UserNotifications. CI may select a recording provider only through the explicit test gate.
 /// </summary>
 internal static class RemoteNotificationDesktopServiceFactory
 {
@@ -29,24 +28,31 @@ internal static class RemoteNotificationDesktopServiceFactory
 
     public static INotificationService? Create()
     {
-        if (string.Equals(
-            Environment.GetEnvironmentVariable("MPT_REMOTE_NOTIFICATIONS_DISABLE_DESKTOP"),
-            "1",
-            StringComparison.Ordinal))
+        if (AllowTestBackend())
         {
-            SetSnapshot(new RemoteNotificationDeliverySnapshot(
-                "disabled", "disabled", "", "", ""));
-            return null;
-        }
+            var mode = Environment.GetEnvironmentVariable(
+                "MPT_REMOTE_NOTIFICATIONS_NOTIFICATION_MODE") ?? "";
+            if (string.Equals(mode, "disabled", StringComparison.OrdinalIgnoreCase))
+            {
+                SetSnapshot(new RemoteNotificationDeliverySnapshot(
+                    "disabled", "test-provider", "", "", ""));
+                return null;
+            }
 
-        var recordPath = Environment.GetEnvironmentVariable(
-            "MPT_REMOTE_NOTIFICATIONS_NOTIFICATION_RECORD_PATH");
-        if (!string.IsNullOrWhiteSpace(recordPath))
-        {
-            SetSnapshot(new RemoteNotificationDeliverySnapshot(
-                "recording", "test-provider", "", "", ""));
-            return new RecordingNotificationService(
-                Path.GetFullPath(Environment.ExpandEnvironmentVariables(recordPath)));
+            if (string.Equals(mode, "record", StringComparison.OrdinalIgnoreCase))
+            {
+                var recordPath = Environment.GetEnvironmentVariable(
+                    "MPT_REMOTE_NOTIFICATIONS_NOTIFICATION_RECORD_PATH");
+                if (string.IsNullOrWhiteSpace(recordPath))
+                {
+                    throw new InvalidOperationException(
+                        "The recording notification backend requires MPT_REMOTE_NOTIFICATIONS_NOTIFICATION_RECORD_PATH.");
+                }
+
+                SetSnapshot(new RemoteNotificationDeliverySnapshot(
+                    "recording", "test-provider", "", "", ""));
+                return new RecordingNotificationService(ExpandPath(recordPath));
+            }
         }
 
         if (!OperatingSystem.IsMacOS())
@@ -79,6 +85,33 @@ internal static class RemoteNotificationDesktopServiceFactory
         {
             return _snapshot;
         }
+    }
+
+    private static bool AllowTestBackend()
+    {
+        return string.Equals(
+            Environment.GetEnvironmentVariable(
+                "MPT_REMOTE_NOTIFICATIONS_ALLOW_TEST_BACKEND"),
+            "1",
+            StringComparison.Ordinal);
+    }
+
+    private static string ExpandPath(string path)
+    {
+        var expanded = Environment.ExpandEnvironmentVariables(path.Trim());
+        if (expanded == "~")
+        {
+            expanded = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+        else if (expanded.StartsWith("~/", StringComparison.Ordinal) ||
+                 expanded.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            expanded = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                expanded[2..]);
+        }
+
+        return Path.GetFullPath(expanded);
     }
 
     private static void RecordSuccess(
@@ -128,7 +161,7 @@ internal static class RemoteNotificationDesktopServiceFactory
 
         try
         {
-            var root = Path.GetFullPath(Environment.ExpandEnvironmentVariables(dataRoot));
+            var root = ExpandPath(dataRoot);
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, "notification-delivery.json");
             var temporary = $"{path}.{Environment.ProcessId}.tmp";
