@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using MyPowerTools.RemoteNotifications.Configuration;
 
 namespace RemoteNotifications.Service;
@@ -61,7 +62,11 @@ internal static class RemoteNotificationsProcessSecurity
         }
 
         _instanceLock.SetLength(0);
-        using (var writer = new StreamWriter(_instanceLock, leaveOpen: true))
+        using (var writer = new StreamWriter(
+                   _instanceLock,
+                   new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                   bufferSize: 1024,
+                   leaveOpen: true))
         {
             writer.WriteLine($"pid={Environment.ProcessId}");
             writer.WriteLine($"startedAt={DateTimeOffset.UtcNow:O}");
