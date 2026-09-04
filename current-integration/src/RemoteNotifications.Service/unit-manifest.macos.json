@@ -2,7 +2,7 @@
   "id": "remote-notifications.service",
   "toolId": "remote-notifications",
   "displayName": "Remote Notifications Service",
-  "exec": "../../RemoteNotifications.Service",
+  "exec": "../../Helpers/MyPowerTools Remote Notifications.app/Contents/MacOS/RemoteNotifications.Service",
   "arguments": [
     "--socket",
     "$TMPDIR/mypowertools/remote-notifications.core.sock",
@@ -15,6 +15,8 @@
   "environment": {
     "RemoteNotifications__Transport": "unix-domain-socket",
     "RemoteNotifications__UnixSocket__Path": "$TMPDIR/mypowertools/remote-notifications.core.sock",
+    "MPT_REMOTE_NOTIFICATIONS_SOCKET": "$TMPDIR/mypowertools/remote-notifications.core.sock",
+    "MPT_REMOTE_NOTIFICATIONS_SKIP_LEGACY_IMPORT": "1",
     "MPT_TOOL_DATA_ROOT": "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications"
   },
   "autostart": true,
