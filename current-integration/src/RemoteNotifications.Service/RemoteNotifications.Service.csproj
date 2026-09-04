@@ -18,6 +18,13 @@
     </Description>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">
+    <RemoteNotificationsMacArchitecture>arm64</RemoteNotificationsMacArchitecture>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+    <RemoteNotificationsMacArchitecture>x86_64</RemoteNotificationsMacArchitecture>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
@@ -30,11 +37,9 @@
     <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Platform.Mac\MyPowerTools.Platform.Mac.csproj" />
   </ItemGroup>
 
-  <!-- The worker reuses the real product business logic (no duplication of the signed puller,
-       dedup/history store or seen-id ring). These are the Surface originals (public visibility,
-       no ANDROID_TOOLS_ADAPTER define), so the worker compiles the exact same classes the Shell
-       Surface uses. The Windows toast COM path is reimplemented locally in ToastRuntime.cs so
-       the worker never takes an Avalonia dependency. -->
+  <!-- The worker reuses the real product business logic. These linked files are the
+       Surface originals, so the Shell and the independently supervised worker share one
+       signed-pull, deduplication and persistence implementation. -->
   <ItemGroup>
     <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
              Link="Shared\RemoteNotificationSettingsStore.cs" />
@@ -44,6 +49,16 @@
              Link="Shared\RemoteNotificationsLegacyStore.cs" />
     <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
              Link="Shared\RemoteNotificationSeenIdRing.cs" />
+    <None Include="native\RemoteNotificationsMac.mm" />
   </ItemGroup>
+
+  <!-- Build a service-local native bridge on the target Mac. Its publish call waits for
+       both the authorization callback and addNotificationRequest completion, so the worker
+       increments its shown counter only after Notification Center accepts the request. -->
+  <Target Name="BuildRemoteNotificationsMacNotificationBridge"
+          AfterTargets="Publish"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$(RemoteNotificationsMacArchitecture)' != ''">
+    <Exec Command="/usr/bin/xcrun clang++ -std=c++17 -fobjc-arc -dynamiclib -arch $(RemoteNotificationsMacArchitecture) -mmacosx-version-min=12.0 -framework AppKit -framework Foundation -framework UserNotifications -install_name @rpath/libRemoteNotificationsMac.dylib &quot;$(MSBuildProjectDirectory)/native/RemoteNotificationsMac.mm&quot; -o &quot;$(PublishDir)libRemoteNotificationsMac.dylib&quot;" />
+  </Target>
 
 </Project>
