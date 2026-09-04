@@ -26,9 +26,9 @@ internal sealed class MacUserNotificationService : INotificationService
 
     public MacUserNotificationService()
     {
-        if (!OperatingSystem.IsMacOS() || UseRecordingBackend())
+        if (!OperatingSystem.IsMacOS())
         {
-            _initializationStatus = NativeOk;
+            _initializationStatus = NativeOsUnsupported;
             return;
         }
 
@@ -37,7 +37,9 @@ internal sealed class MacUserNotificationService : INotificationService
             // Apple requires the UNUserNotificationCenter delegate to be registered during
             // application launch. Program.cs creates this service before the polling loop and
             // control socket start, so notification actions remain routable even when the first
-            // message arrives much later.
+            // message arrives much later. The recording backend still performs this check: the
+            // production gate must prove the worker runs from its real helper bundle and loads
+            // the native bridge before it may substitute deterministic notification storage.
             _initializationStatus = Native.Initialize();
         }
         catch (DllNotFoundException)
@@ -70,6 +72,7 @@ internal sealed class MacUserNotificationService : INotificationService
 
         if (UseRecordingBackend())
         {
+            EnsureNativeInitializationSucceeded();
             await RecordNotificationAsync(request, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -117,14 +120,9 @@ internal sealed class MacUserNotificationService : INotificationService
                 "macOS notification permission is denied for MyPowerTools. Enable notifications in System Settings, then retry.");
         }
 
-        // Preserve message delivery when the process is unbundled during development or
-        // when UserNotifications is temporarily unavailable. This fallback has no reliable
-        // click-through activation, so every use is written to stderr for diagnostics.
-        if (status is NativeNoBundle
-            or NativeUnavailable
-            or NativeOsUnsupported
-            or NativeRequestFailed
-            or NativeTimedOut)
+        // Preserve message delivery when UserNotifications is temporarily unavailable. The
+        // worker logs every fallback because osascript cannot provide exact-message activation.
+        if (status is NativeRequestFailed or NativeTimedOut)
         {
             Console.Error.WriteLine(
                 $"RemoteNotifications.Service native notification status {status}; using osascript fallback.");
@@ -132,8 +130,30 @@ internal sealed class MacUserNotificationService : INotificationService
             return;
         }
 
-        throw new InvalidOperationException(
-            $"macOS rejected the notification request with status {status}.");
+        throw new InvalidOperationException(NativeInitializationFailure(status));
+    }
+
+    private void EnsureNativeInitializationSucceeded()
+    {
+        if (_initializationStatus != NativeOk)
+        {
+            throw new InvalidOperationException(
+                $"The macOS production test backend refused to run: {NativeInitializationFailure(_initializationStatus)}");
+        }
+    }
+
+    private static string NativeInitializationFailure(int status)
+    {
+        return status switch
+        {
+            NativeNoBundle =>
+                "Remote Notifications is not running from the signed MyPowerTools helper bundle, so macOS notification identity is unavailable.",
+            NativeUnavailable =>
+                "The Remote Notifications native notification bridge could not be loaded from the helper bundle.",
+            NativeOsUnsupported =>
+                "The installed macOS version does not support the required notification API.",
+            _ => $"macOS rejected notification initialization with status {status}."
+        };
     }
 
     private static bool UseRecordingBackend()
