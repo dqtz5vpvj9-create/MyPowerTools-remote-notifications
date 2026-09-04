@@ -16,7 +16,8 @@ internal static class RemoteNotificationServiceControl
 {
     private const string PipeName = "remote-notifications.core";
     private const int MaximumFrameBytes = 1024 * 1024;
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan StatusProbeTimeout = TimeSpan.FromMilliseconds(500);
 
     public static async Task<RemoteNotificationServiceControlResult> TrySendAsync(
         string command,
@@ -26,11 +27,14 @@ internal static class RemoteNotificationServiceControl
         var endpoint = OperatingSystem.IsWindows()
             ? PipeName
             : ResolveSocketPath();
+        var operationTimeout = string.Equals(command, "state", StringComparison.Ordinal)
+            ? StatusProbeTimeout
+            : CommandTimeout;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
-            timeout.CancelAfter(Timeout);
+            timeout.CancelAfter(operationTimeout);
             await using var stream = await ConnectAsync(endpoint, timeout.Token)
                 .ConfigureAwait(false);
             var request = new JsonObject { ["command"] = command };
@@ -69,7 +73,7 @@ internal static class RemoteNotificationServiceControl
                 false,
                 endpoint,
                 null,
-                $"Remote Notifications Service timed out at {endpoint}.");
+                $"Remote Notifications Service timed out after {operationTimeout.TotalMilliseconds:0} ms at {endpoint}.");
         }
         catch (Exception exception) when (
             exception is IOException or SocketException or UnauthorizedAccessException or
