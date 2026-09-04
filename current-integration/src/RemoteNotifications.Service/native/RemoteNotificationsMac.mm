@@ -73,6 +73,24 @@ static RemoteNotificationsMacDelegate *NotificationDelegateInstance(void) {
     return instance;
 }
 
+static int InitializeNotificationCenter(void) API_AVAILABLE(macos(11.0)) {
+    if (NSBundle.mainBundle.bundleIdentifier.length == 0) {
+        return RemoteNotificationsMacNoBundle;
+    }
+
+    @try {
+        UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
+        if (center == nil) {
+            return RemoteNotificationsMacUnavailable;
+        }
+        center.delegate = NotificationDelegateInstance();
+        return RemoteNotificationsMacOk;
+    } @catch (NSException *exception) {
+        (void)exception;
+        return RemoteNotificationsMacUnavailable;
+    }
+}
+
 static int ResolveAuthorization(
     UNUserNotificationCenter *center,
     dispatch_time_t deadline) API_AVAILABLE(macos(11.0)) {
@@ -125,6 +143,15 @@ static int ResolveAuthorization(
         : RemoteNotificationsMacAuthorizationDenied;
 }
 
+extern "C" int remote_notifications_mac_initialize(void) {
+    @autoreleasepool {
+        if (@available(macOS 11.0, *)) {
+            return InitializeNotificationCenter();
+        }
+        return RemoteNotificationsMacOsUnsupported;
+    }
+}
+
 extern "C" int remote_notifications_mac_publish(
     const char *identifier,
     const char *title,
@@ -133,17 +160,13 @@ extern "C" int remote_notifications_mac_publish(
     int timeoutMilliseconds) {
     @autoreleasepool {
         if (@available(macOS 11.0, *)) {
-            if (NSBundle.mainBundle.bundleIdentifier.length == 0) {
-                return RemoteNotificationsMacNoBundle;
+            const int initialized = InitializeNotificationCenter();
+            if (initialized != RemoteNotificationsMacOk) {
+                return initialized;
             }
 
             @try {
                 UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
-                if (center == nil) {
-                    return RemoteNotificationsMacUnavailable;
-                }
-
-                center.delegate = NotificationDelegateInstance();
                 const dispatch_time_t deadline = DeadlineFromMilliseconds(timeoutMilliseconds);
                 const int authorization = ResolveAuthorization(center, deadline);
                 if (authorization != RemoteNotificationsMacOk) {
