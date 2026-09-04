@@ -8,7 +8,7 @@
   "entrypoints": [
     {
       "kind": "inproc-dotnet",
-      "priority": 110,
+      "priority": 100,
       "assembly": "../../AndroidTools.MyPowerTools.dll",
       "type": "AndroidTools.MyPowerTools.RemoteNotificationsServiceObserverModule"
     }
