@@ -431,9 +431,13 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
     private void ApplyServiceState(RemoteNotificationsServiceState state)
     {
-        ConnectionState = state.ConnectionState;
+        var deliveryFailed = state.NotificationState is
+            "permission-denied" or "delivery-failed" or "error";
+        ConnectionState = deliveryFailed ? "error" : state.ConnectionState;
         LastPoll = state.LastPoll;
-        LastError = state.LastError;
+        LastError = deliveryFailed && !string.IsNullOrWhiteSpace(state.NotificationError)
+            ? state.NotificationError
+            : state.LastError;
         Latest = state.Latest;
         Fetched = state.Fetched.ToString(CultureInfo.InvariantCulture);
         Shown = state.Shown.ToString(CultureInfo.InvariantCulture);

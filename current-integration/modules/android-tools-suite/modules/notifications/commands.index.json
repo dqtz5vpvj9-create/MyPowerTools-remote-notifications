@@ -14,13 +14,44 @@
       }
     },
     {
-      "id": "android-tools.notifications.test-event",
-      "title": "Send notification module test event",
-      "subtitle": "Publishes a NotificationCenter event",
+      "id": "android-tools.notifications.server.check",
+      "title": "Check notification service",
+      "subtitle": "Read service, signing, delivery, and inbox state",
       "kind": "action",
       "category": "Android Tools",
       "execution": {
-        "type": "host.notification.test"
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "android-tools.notifications.sync-now",
+      "title": "Synchronize notifications now",
+      "subtitle": "Perform one signed pull through the supervised service",
+      "kind": "action",
+      "category": "Android Tools",
+      "timeoutMs": 20000,
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "android-tools.notifications.inbox.summary",
+      "title": "Summarize notification inbox",
+      "subtitle": "Show persisted message and topic counts",
+      "kind": "action",
+      "category": "Android Tools",
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "android-tools.notifications.test-event",
+      "title": "Create production-path test notification",
+      "subtitle": "Persist and deliver a test message through the supervised service",
+      "kind": "action",
+      "category": "Android Tools",
+      "execution": {
+        "type": "module.execute"
       }
     }
   ]
