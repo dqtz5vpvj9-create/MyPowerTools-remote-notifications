@@ -166,6 +166,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
     public void CloseSearch()
     {
+        SearchAllNotifications = false;
         SearchQuery = "";
         IsSearchVisible = false;
     }
@@ -650,6 +651,8 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         OnPropertyChanged(nameof(EmptyOverlayText));
         OnPropertyChanged(nameof(MessageCountText));
         OnPropertyChanged(nameof(SearchResultText));
+        OnPropertyChanged(nameof(IsGlobalSearch));
+        OnPropertyChanged(nameof(SearchScopeText));
         OnPropertyChanged(nameof(HasSystemHealth));
         OnPropertyChanged(nameof(SystemHealthText));
         OnPropertyChanged(nameof(SystemHealthForeground));
