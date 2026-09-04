@@ -15,7 +15,7 @@
   "environment": {
     "RemoteNotifications__Transport": "unix-domain-socket",
     "RemoteNotifications__UnixSocket__Path": "$TMPDIR/mypowertools/remote-notifications.core.sock",
-    "MPT_TOOL_DATA_ROOT": "~/Library/Application Support/MyPowerTools/state/modules/android-tools.notifications/data",
+    "MPT_TOOL_DATA_ROOT": "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications",
     "MPT_REMOTE_NOTIFICATIONS_SKIP_LEGACY_IMPORT": "1"
   },
   "autostart": true,
@@ -27,7 +27,7 @@
   },
   "stopTimeoutMs": 5000,
   "dataRoots": [
-    "~/Library/Application Support/MyPowerTools/state/modules/android-tools.notifications/data"
+    "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications"
   ],
   "dependsOn": [],
   "instanceToken": "remote-notifications-service-v1"
