@@ -7,6 +7,7 @@ namespace RemoteNotifications.Surface.ViewModels;
 
 public sealed partial class RemoteNotificationsViewModel
 {
+    private bool _searchAllNotifications;
     private readonly ObservableCollection<RemoteNotificationMessageViewModel> _visibleMessages = [];
     private ReadOnlyObservableCollection<RemoteNotificationMessageViewModel>? _visibleMessagesView;
 
@@ -43,6 +44,12 @@ public sealed partial class RemoteNotificationsViewModel
     private IEnumerable<RemoteNotificationMessageViewModel> EnumerateVisibleMessages()
     {
         var query = SearchQuery.Trim();
+        if (IsGlobalSearch)
+        {
+            return Messages.Where(message =>
+                !RemoteNotificationsLegacyStore.IsSystemHealthRecord(message.Source) &&
+                message.MatchesSearch(query));
+        }
 
         // Dedicated Claude Task page: ignore filterLabel entirely and
         // show only the Claude Task-labeled items. Search still applies.
@@ -93,6 +100,22 @@ public sealed partial class RemoteNotificationsViewModel
     }
 
     public bool HasSearchQuery => !string.IsNullOrWhiteSpace(SearchQuery);
+
+    /// <summary>Temporarily searches across labels and the Claude Task page without changing the saved filter.</summary>
+    public bool SearchAllNotifications
+    {
+        get => _searchAllNotifications;
+        set
+        {
+            if (SetProperty(ref _searchAllNotifications, value))
+            {
+                NotifyMessageViewChanged();
+            }
+        }
+    }
+
+    public bool IsGlobalSearch => SearchAllNotifications && HasSearchQuery;
+    public string SearchScopeText => IsGlobalSearch ? "All labels and Claude Task" : "Current view";
 
     public string SearchResultText
     {

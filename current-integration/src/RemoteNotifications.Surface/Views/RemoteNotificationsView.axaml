@@ -211,6 +211,7 @@
             Background="{DynamicResource MptBrushCardBackground}"
             IsVisible="{Binding IsSearchVisible}">
       <Grid ColumnDefinitions="Auto,*,Auto,Auto"
+            RowDefinitions="Auto,Auto" RowSpacing="8"
             ColumnSpacing="10">
         <TextBlock Text="⌕"
                    FontSize="20"
@@ -228,6 +229,12 @@
         <controls:MptButton Grid.Column="3"
                             Content="Close"
                             Click="OnCloseSearchClick" />
+        <WrapPanel Grid.Row="1" Grid.ColumnSpan="4">
+          <controls:MptCheckBox Content="Search all labels and Claude Task"
+                                IsChecked="{Binding SearchAllNotifications, Mode=TwoWay}" />
+          <TextBlock Text="{Binding SearchScopeText}" Classes="MptMeta" Margin="12,0,0,0"
+                     VerticalAlignment="Center" />
+        </WrapPanel>
       </Grid>
     </Border>
 
