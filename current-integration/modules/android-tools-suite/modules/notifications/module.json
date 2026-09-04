@@ -11,21 +11,6 @@
       "priority": 110,
       "assembly": "../../AndroidTools.MyPowerTools.dll",
       "type": "AndroidTools.MyPowerTools.RemoteNotificationsServiceObserverModule"
-    },
-    {
-      "kind": "package-runtime",
-      "priority": 90,
-      "runtimeId": "module-host",
-      "service": "android_tools.notifications.v1.NotificationsModule"
-    },
-    {
-      "kind": "jsonrpc-stdio",
-      "priority": 10,
-      "compat": true,
-      "command": "python",
-      "args": [
-        "compat/notifications/module_server.py"
-      ]
     }
   ],
   "capabilities": [
