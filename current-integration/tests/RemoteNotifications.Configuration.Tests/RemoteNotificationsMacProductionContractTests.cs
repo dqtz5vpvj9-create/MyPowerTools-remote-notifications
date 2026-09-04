@@ -22,11 +22,16 @@ public sealed class RemoteNotificationsMacProductionContractTests
     }
 
     [Fact]
-    public void Mac_native_bridge_waits_for_authorization_and_delivery_completion()
+    public void Mac_native_bridge_registers_early_and_waits_for_delivery_completion()
     {
         var source = File.ReadAllText(
             Path.Combine(ServiceRoot, "native", "RemoteNotificationsMac.mm"));
+        var managed = File.ReadAllText(
+            Path.Combine(ServiceRoot, "MacUserNotificationService.cs"));
 
+        Assert.Contains("remote_notifications_mac_initialize", source, StringComparison.Ordinal);
+        Assert.Contains("center.delegate = NotificationDelegateInstance()", source, StringComparison.Ordinal);
+        Assert.Contains("Native.Initialize()", managed, StringComparison.Ordinal);
         Assert.Contains("getNotificationSettingsWithCompletionHandler", source, StringComparison.Ordinal);
         Assert.Contains("requestAuthorizationWithOptions", source, StringComparison.Ordinal);
         Assert.Contains("addNotificationRequest:request withCompletionHandler", source, StringComparison.Ordinal);
