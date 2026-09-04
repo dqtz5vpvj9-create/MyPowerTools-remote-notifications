@@ -59,9 +59,8 @@ if (!OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(socketPath))
     socketPath = Path.Combine(Path.GetTempPath(), "mypowertools", "remote-notifications.core.sock");
 }
 var heartbeatFile = GetOption(args, "--heartbeat-file");
-INotificationService? desktopNotifications = OperatingSystem.IsMacOS()
-    ? new MacUserNotificationService()
-    : null;
+INotificationService? desktopNotifications =
+    RemoteNotificationDesktopServiceFactory.Create();
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -381,6 +380,7 @@ static async Task ServeControlSocket(
 
     using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
     listener.Bind(new UnixDomainSocketEndPoint(path));
+    HardenSocketPermissions(path);
     listener.Listen(8);
     try
     {
@@ -432,7 +432,7 @@ static async Task ServeControlClient(
             "ping" => new { pong = true },
             "state" or "get_state" => state.ToStateObject(),
             "poll" => HandlePoll(state, pollGate, desktopNotifications),
-            "inject" => HandleInject(request, state, pollGate),
+            "inject" => HandleInject(request, state, pollGate, desktopNotifications),
             _ => null
         };
         var ok = data is not null;
@@ -461,22 +461,35 @@ static object HandlePoll(
     }
 }
 
-static object HandleInject(JsonDocument request, WorkerState state, object pollGate)
+static object HandleInject(
+    JsonDocument request,
+    WorkerState state,
+    object pollGate,
+    INotificationService? desktopNotifications)
 {
     lock (pollGate)
     {
-        return HandleInjectCore(request, state);
+        return HandleInjectCore(request, state, desktopNotifications);
     }
 }
 
-static object HandleInjectCore(JsonDocument request, WorkerState state)
+static object HandleInjectCore(
+    JsonDocument request,
+    WorkerState state,
+    INotificationService? desktopNotifications)
 {
     var idSuffix = Guid.NewGuid().ToString("N")[..8];
     var now = DateTimeOffset.UtcNow;
+    var title = ReadRequestString(request, "title", "Remote Notifications test");
+    var message = ReadRequestString(
+        request,
+        "message",
+        $"Service Unit injected message {idSuffix} at {now:O}");
+    title = NormalizeToastText(title, 80).Replace("[", "").Replace("]", "");
     var record = new RemoteNotificationRecord(
         $"test-inject-{idSuffix}",
         "default",
-        $"[test] Service Unit injected message {idSuffix} at {now:O}",
+        $"[{title}] {message}",
         "info",
         now.ToString("O", CultureInfo.InvariantCulture),
         now.ToString("O", CultureInfo.InvariantCulture));
@@ -485,13 +498,14 @@ static object HandleInjectCore(JsonDocument request, WorkerState state)
     var store = new RemoteNotificationsLegacyStore(settingsStore);
     var snapshot = store.Load();
     var seen = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
-    foreach (var message in snapshot.MessagesOldestFirst)
+    foreach (var existing in snapshot.MessagesOldestFirst)
     {
-        seen.TryAccept(RemoteNotificationsLegacyStore.StableId(message));
-        seen.TryAccept(RemoteNotificationsLegacyStore.FallbackId(message));
+        seen.TryAccept(RemoteNotificationsLegacyStore.StableId(existing));
+        seen.TryAccept(RemoteNotificationsLegacyStore.FallbackId(existing));
     }
 
-    if (!seen.TryAccept(RemoteNotificationsLegacyStore.StableId(record), RemoteNotificationsLegacyStore.FallbackId(record)))
+    var stableId = RemoteNotificationsLegacyStore.StableId(record);
+    if (!seen.TryAccept(stableId, RemoteNotificationsLegacyStore.FallbackId(record)))
     {
         return new { injected = false, reason = "duplicate" };
     }
@@ -510,13 +524,60 @@ static object HandleInjectCore(JsonDocument request, WorkerState state)
     labels.Insert(0, label);
     store.SaveKnownLabels(labels);
 
-    state.RecordInject(RemoteNotificationsLegacyStore.StableId(record));
-    return new { injected = true, messageId = RemoteNotificationsLegacyStore.StableId(record), historyCount = merged.Length };
+    var shown = DispatchBanners([record], false, desktopNotifications);
+    state.RecordInject(stableId, shown);
+    return new
+    {
+        injected = true,
+        messageId = stableId,
+        historyCount = merged.Length,
+        shown
+    };
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+static void HardenSocketPermissions(string path)
+{
+    if (OperatingSystem.IsWindows())
+    {
+        return;
+    }
+
+    try
+    {
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+    catch (Exception exception) when (
+        exception is IOException or UnauthorizedAccessException or
+            PlatformNotSupportedException)
+    {
+        try
+        {
+            Console.Error.WriteLine(
+                $"RemoteNotifications.Service could not harden socket permissions: {exception.Message}");
+        }
+        catch
+        {
+        }
+    }
+}
+
+static string ReadRequestString(
+    JsonDocument request,
+    string name,
+    string fallback)
+{
+    return request.RootElement.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(value.GetString())
+            ? value.GetString()!.Trim()
+            : fallback;
+}
+
 static string ResolveWaterline(IReadOnlyList<RemoteNotificationRecord> messages)
 {
     var newest = messages
@@ -678,13 +739,21 @@ sealed class WorkerState
         }
     }
 
-    public void RecordInject(string messageId)
+    public void RecordInject(string messageId, int shown)
     {
         lock (_gate)
         {
             _injectCount++;
             _totalAccepted++;
-            _latest = DateTimeOffset.Now.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
+            _totalShown += shown;
+            _lastFetched = 1;
+            _lastShown = shown;
+            _connectionState = "ok";
+            _lastError = "none";
+            _lastPoll = DateTimeOffset.Now.ToString(
+                "yyyy/MM/dd HH:mm:ss",
+                CultureInfo.InvariantCulture);
+            _latest = _lastPoll;
         }
     }
 
@@ -702,6 +771,7 @@ sealed class WorkerState
     {
         lock (_gate)
         {
+            var delivery = RemoteNotificationDesktopServiceFactory.Snapshot();
             return new
             {
                 pid = Environment.ProcessId,
@@ -716,7 +786,12 @@ sealed class WorkerState
                 shown = _lastShown,
                 injectCount = _injectCount,
                 pollIntervalSeconds = _pollIntervalSeconds,
-                startedAt = _startedAt.ToString("O", CultureInfo.InvariantCulture)
+                startedAt = _startedAt.ToString("O", CultureInfo.InvariantCulture),
+                notificationState = delivery.State,
+                notificationAuthorization = delivery.Authorization,
+                notificationError = delivery.Error,
+                lastNotificationAtUtc = delivery.LastDeliveredAtUtc,
+                lastNotificationMessageId = delivery.LastMessageId
             };
         }
     }
