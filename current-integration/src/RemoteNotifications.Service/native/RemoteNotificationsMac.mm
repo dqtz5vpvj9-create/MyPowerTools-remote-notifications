@@ -5,8 +5,6 @@
 #include <dispatch/dispatch.h>
 #include <stdint.h>
 
-namespace {
-
 enum RemoteNotificationsMacStatus : int {
     RemoteNotificationsMacOk = 0,
     RemoteNotificationsMacOsUnsupported = -1,
@@ -17,7 +15,7 @@ enum RemoteNotificationsMacStatus : int {
     RemoteNotificationsMacUnavailable = 3,
 };
 
-NSString *StringFromUtf8(const char *value) {
+static NSString *StringFromUtf8(const char *value) {
     if (value == nullptr) {
         return @"";
     }
@@ -26,7 +24,7 @@ NSString *StringFromUtf8(const char *value) {
     return result == nil ? @"" : result;
 }
 
-dispatch_time_t DeadlineFromMilliseconds(int timeoutMilliseconds) {
+static dispatch_time_t DeadlineFromMilliseconds(int timeoutMilliseconds) {
     const int boundedTimeout = timeoutMilliseconds <= 0
         ? 10000
         : MIN(timeoutMilliseconds, 60000);
@@ -66,7 +64,7 @@ dispatch_time_t DeadlineFromMilliseconds(int timeoutMilliseconds) {
 
 @end
 
-RemoteNotificationsMacDelegate *NotificationDelegateInstance(void) {
+static RemoteNotificationsMacDelegate *NotificationDelegateInstance(void) {
     static RemoteNotificationsMacDelegate *instance;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -75,7 +73,7 @@ RemoteNotificationsMacDelegate *NotificationDelegateInstance(void) {
     return instance;
 }
 
-int ResolveAuthorization(
+static int ResolveAuthorization(
     UNUserNotificationCenter *center,
     dispatch_time_t deadline) API_AVAILABLE(macos(11.0)) {
     dispatch_semaphore_t settingsSemaphore = dispatch_semaphore_create(0);
@@ -126,8 +124,6 @@ int ResolveAuthorization(
         ? RemoteNotificationsMacOk
         : RemoteNotificationsMacAuthorizationDenied;
 }
-
-}  // namespace
 
 extern "C" int remote_notifications_mac_publish(
     const char *identifier,
