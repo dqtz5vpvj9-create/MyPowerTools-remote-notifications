@@ -6,15 +6,22 @@ namespace RemoteNotifications.Service;
 
 /// <summary>
 /// Prevents two Remote Notifications workers from owning the signed-pull waterline and
-/// desktop-notification stream at the same time.
+/// desktop-notification stream at the same time. Protocol-activation invocations bypass
+/// the worker lock because they only forward one notification click to MyPowerTools and exit.
 /// </summary>
 internal static class RemoteNotificationsServiceProcessGuard
 {
+    private const string ActivationArgument = "--remote-notification-activation";
     private static FileStream? _lockStream;
 
     [ModuleInitializer]
     internal static void Acquire()
     {
+        if (IsActivationInvocation(Environment.GetCommandLineArgs()))
+        {
+            return;
+        }
+
         var dataRoot = ResolveDataRoot();
         Directory.CreateDirectory(dataRoot);
         HardenDirectory(dataRoot);
@@ -51,12 +58,34 @@ internal static class RemoteNotificationsServiceProcessGuard
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Release();
     }
 
+    internal static bool IsActivationInvocation(IReadOnlyList<string> arguments)
+    {
+        for (var index = 1; index < arguments.Count; index++)
+        {
+            var argument = arguments[index];
+            if (string.Equals(argument, ActivationArgument, StringComparison.OrdinalIgnoreCase))
+            {
+                return index + 1 < arguments.Count &&
+                    !string.IsNullOrWhiteSpace(arguments[index + 1]);
+            }
+
+            var prefix = ActivationArgument + "=";
+            if (argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(argument[prefix.Length..]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static string ResolveDataRoot()
     {
         var configured = Environment.GetEnvironmentVariable("MPT_TOOL_DATA_ROOT");
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured));
+            return ExpandPath(configured);
         }
 
         var localAppData = Environment.GetFolderPath(
@@ -69,6 +98,24 @@ internal static class RemoteNotificationsServiceProcessGuard
         }
 
         return Path.Combine(localAppData, "MyPowerTools", "RemoteNotifications");
+    }
+
+    private static string ExpandPath(string path)
+    {
+        var expanded = Environment.ExpandEnvironmentVariables(path.Trim());
+        if (expanded == "~")
+        {
+            expanded = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+        else if (expanded.StartsWith("~/", StringComparison.Ordinal) ||
+                 expanded.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            expanded = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                expanded[2..]);
+        }
+
+        return Path.GetFullPath(expanded);
     }
 
     private static void HardenDirectory(string path)
