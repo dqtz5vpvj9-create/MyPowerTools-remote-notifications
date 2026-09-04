@@ -8,17 +8,23 @@ public sealed class RemoteNotificationsMacProductionContractTests
         Path.Combine(TestPaths.IntegrationRoot, "src", "RemoteNotifications.Service");
 
     [Fact]
-    public void Mac_service_uses_the_remote_notifications_tool_data_directory()
+    public void Mac_service_uses_the_helper_bundle_and_remote_notifications_tool_data_directory()
     {
         var manifestPath = Path.Combine(ServiceRoot, "unit-manifest.macos.json");
         using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var root = manifest.RootElement;
         var environment = root.GetProperty("environment");
-        var expected = "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications";
+        var expectedDataRoot = "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications";
+        const string expectedExecutable =
+            "../../Helpers/MyPowerTools Remote Notifications.app/Contents/MacOS/RemoteNotifications.Service";
+        const string expectedWorkingDirectory =
+            "../../Helpers/MyPowerTools Remote Notifications.app/Contents/MacOS";
 
-        Assert.Equal(expected, environment.GetProperty("MPT_TOOL_DATA_ROOT").GetString());
+        Assert.Equal(expectedExecutable, root.GetProperty("exec").GetString());
+        Assert.Equal(expectedWorkingDirectory, root.GetProperty("workingDirectory").GetString());
+        Assert.Equal(expectedDataRoot, environment.GetProperty("MPT_TOOL_DATA_ROOT").GetString());
         Assert.Equal("1", environment.GetProperty("MPT_REMOTE_NOTIFICATIONS_SKIP_LEGACY_IMPORT").GetString());
-        Assert.Equal(expected, root.GetProperty("dataRoots")[0].GetString());
+        Assert.Equal(expectedDataRoot, root.GetProperty("dataRoots")[0].GetString());
     }
 
     [Fact]
