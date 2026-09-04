@@ -229,12 +229,12 @@
         <controls:MptButton Grid.Column="3"
                             Content="Close"
                             Click="OnCloseSearchClick" />
-        <WrapPanel Grid.Row="1" Grid.ColumnSpan="4">
+        <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.ColumnSpan="4">
           <controls:MptCheckBox Content="Search all labels and Claude Task"
                                 IsChecked="{Binding SearchAllNotifications, Mode=TwoWay}" />
           <TextBlock Text="{Binding SearchScopeText}" Classes="MptMeta" Margin="12,0,0,0"
                      VerticalAlignment="Center" />
-        </WrapPanel>
+        </StackPanel>
       </Grid>
     </Border>
 
