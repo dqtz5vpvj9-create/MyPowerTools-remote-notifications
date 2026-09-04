@@ -70,18 +70,19 @@ public sealed class RemoteNotificationsMacProductionContractTests
             "notifications",
             "module.json");
         using var manifest = JsonDocument.Parse(File.ReadAllText(moduleManifest));
-        var entrypoints = manifest.RootElement.GetProperty("entrypoints");
+        var entrypoint = Assert.Single(
+            manifest.RootElement.GetProperty("entrypoints").EnumerateArray());
         var observer = File.ReadAllText(Path.Combine(
             integrationRoot,
             "src",
             "AndroidTools.MyPowerTools",
             "RemoteNotificationsServiceObserverModule.cs"));
 
-        Assert.Single(entrypoints.EnumerateArray());
         Assert.Equal(
             "RemoteNotificationsServiceObserverModule",
-            entrypoints[0].GetProperty("type").GetString()!.Split('.').Last());
-        Assert.Equal("inproc-dotnet", entrypoints[0].GetProperty("kind").GetString());
+            entrypoint.GetProperty("type").GetString()!.Split('.').Last());
+        Assert.Equal("inproc-dotnet", entrypoint.GetProperty("kind").GetString());
+        Assert.InRange(entrypoint.GetProperty("priority").GetInt32(), 0, 100);
         Assert.Contains(
             manifest.RootElement.GetProperty("requires").EnumerateArray(),
             requirement =>
