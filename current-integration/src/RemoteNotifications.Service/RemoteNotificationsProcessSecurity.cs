@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using MyPowerTools.Abstractions;
 using MyPowerTools.RemoteNotifications.Configuration;
 
 namespace RemoteNotifications.Service;
@@ -12,7 +13,7 @@ namespace RemoteNotifications.Service;
 /// </summary>
 internal static class RemoteNotificationsProcessSecurity
 {
-    private const string ActivationArgument = "--remote-notification-activation";
+    private const string LegacyActivationArgument = "--remote-notification-activation";
     private const uint OwnerOnlyMask = 0x3F; // octal 077
     private static FileStream? _instanceLock;
 
@@ -24,10 +25,7 @@ internal static class RemoteNotificationsProcessSecurity
             return;
         }
 
-        if (!OperatingSystem.IsWindows())
-        {
-            _ = Umask(OwnerOnlyMask);
-        }
+        ApplyOwnerOnlyUmask();
 
         var dataRoot = ResolveDataRoot();
         Directory.CreateDirectory(dataRoot);
@@ -78,10 +76,28 @@ internal static class RemoteNotificationsProcessSecurity
 
     private static bool IsActivationProcess(IReadOnlyList<string> arguments)
     {
-        var prefix = ActivationArgument + "=";
+        return IsArgumentPresent(arguments, ToolActivationProtocol.ArgumentName) ||
+               IsArgumentPresent(arguments, LegacyActivationArgument);
+    }
+
+    private static bool IsArgumentPresent(IReadOnlyList<string> arguments, string name)
+    {
+        var prefix = name + "=";
         return arguments.Any(argument =>
-            string.Equals(argument, ActivationArgument, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(argument, name, StringComparison.OrdinalIgnoreCase) ||
             argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void ApplyOwnerOnlyUmask()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            _ = MacUmask(OwnerOnlyMask);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            _ = LinuxUmask(OwnerOnlyMask);
+        }
     }
 
     private static string ResolveDataRoot()
@@ -102,6 +118,9 @@ internal static class RemoteNotificationsProcessSecurity
         stream?.Dispose();
     }
 
+    [DllImport("libSystem.B.dylib", EntryPoint = "umask", CallingConvention = CallingConvention.Cdecl)]
+    private static extern uint MacUmask(uint mask);
+
     [DllImport("libc", EntryPoint = "umask", CallingConvention = CallingConvention.Cdecl)]
-    private static extern uint Umask(uint mask);
+    private static extern uint LinuxUmask(uint mask);
 }
