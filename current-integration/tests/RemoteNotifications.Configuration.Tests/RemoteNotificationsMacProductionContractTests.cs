@@ -62,7 +62,7 @@ public sealed class RemoteNotificationsMacProductionContractTests
     }
 
     [Fact]
-    public void Recording_backend_requires_an_explicit_test_gate()
+    public void Recording_backend_cannot_hide_a_broken_helper_bundle()
     {
         var source = File.ReadAllText(
             Path.Combine(ServiceRoot, "MacUserNotificationService.cs"));
@@ -70,6 +70,21 @@ public sealed class RemoteNotificationsMacProductionContractTests
         Assert.Contains("MPT_REMOTE_NOTIFICATIONS_ALLOW_TEST_BACKEND", source, StringComparison.Ordinal);
         Assert.Contains("MPT_REMOTE_NOTIFICATIONS_NOTIFICATION_MODE", source, StringComparison.Ordinal);
         Assert.Contains("MPT_REMOTE_NOTIFICATIONS_NOTIFICATION_RECORD_PATH", source, StringComparison.Ordinal);
-        Assert.Contains("using osascript fallback", source, StringComparison.Ordinal);
+        Assert.Contains("EnsureNativeInitializationSucceeded", source, StringComparison.Ordinal);
+        Assert.Contains("not running from the signed MyPowerTools helper bundle", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Worker_enforces_single_instance_and_owner_only_unix_objects()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(ServiceRoot, "RemoteNotificationsProcessSecurity.cs"));
+
+        Assert.Contains("[ModuleInitializer]", source, StringComparison.Ordinal);
+        Assert.Contains("FileShare.None", source, StringComparison.Ordinal);
+        Assert.Contains("remote-notifications.service.lock", source, StringComparison.Ordinal);
+        Assert.Contains("Umask(OwnerOnlyMask)", source, StringComparison.Ordinal);
+        Assert.Contains("UnixFileMode.UserRead | UnixFileMode.UserWrite", source, StringComparison.Ordinal);
+        Assert.Contains("Another Remote Notifications worker already owns", source, StringComparison.Ordinal);
     }
 }
