@@ -18,6 +18,7 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
     private ModuleContext? _context;
     private RemoteNotificationSettingsStore? _settingsStore;
     private RemoteNotificationsLegacyStore? _store;
+    private string _sharedDataDirectory = "";
     private long _settingsRevision = 1;
     private bool _disposed;
 
@@ -41,12 +42,13 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
         cancellationToken.ThrowIfCancellationRequested();
         _context = context;
         _disposed = false;
-        Directory.CreateDirectory(context.DataDirectory);
+        _sharedDataDirectory = ResolveSharedToolDataDirectory(context.DataDirectory);
+        Directory.CreateDirectory(_sharedDataDirectory);
         Directory.CreateDirectory(context.CacheDirectory);
         Directory.CreateDirectory(context.LogDirectory);
         _settingsStore = new RemoteNotificationSettingsStore(
-            Path.Combine(context.DataDirectory, "settings.json"));
-        _store = new RemoteNotificationsLegacyStore(_settingsStore, context.DataDirectory);
+            Path.Combine(_sharedDataDirectory, "settings.json"));
+        _store = new RemoteNotificationsLegacyStore(_settingsStore, _sharedDataDirectory);
         return ValueTask.FromResult(new InitializeResult(
             true,
             context.ProtocolVersion,
@@ -297,6 +299,29 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
         }
     }
 
+    internal static string ResolveSharedToolDataDirectory(string moduleDataDirectory)
+    {
+        var configured = Environment.GetEnvironmentVariable("MPT_TOOL_DATA_ROOT");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured));
+        }
+
+        var data = new DirectoryInfo(Path.GetFullPath(moduleDataDirectory));
+        var module = data.Parent;
+        var modules = module?.Parent;
+        var state = modules?.Parent;
+        if (string.Equals(data.Name, "data", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(module?.Name, "android-tools.notifications", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(modules?.Name, "modules", StringComparison.OrdinalIgnoreCase) &&
+            state is not null)
+        {
+            return Path.Combine(state.FullName, "tools", "remote-notifications");
+        }
+
+        return data.FullName;
+    }
+
     public ValueTask DisposeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -348,7 +373,7 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
             ["latestMessageId"] = latest is null
                 ? ""
                 : RemoteNotificationsLegacyStore.StableId(latest),
-            ["dataDirectory"] = Context.DataDirectory
+            ["dataDirectory"] = _sharedDataDirectory
         };
         return Succeeded(request, payload.ToJsonString(
             new JsonSerializerOptions { WriteIndented = true }));
