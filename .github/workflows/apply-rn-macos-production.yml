@@ -1,0 +1,36 @@
+name: Apply Remote Notifications macOS production patch
+
+on:
+  push:
+    branches:
+      - codex/macos-production-parity-2026-09
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[macos-production-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout production branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/macos-production-parity-2026-09
+          fetch-depth: 0
+
+      - name: Apply validated source transformations
+        run: python3 .github/patches/apply-rn-macos-production.py
+
+      - name: Commit transformed sources
+        shell: bash
+        run: |
+          rm -f .github/patches/apply-rn-macos-production.py
+          rm -f .github/workflows/apply-rn-macos-production.yml
+          rmdir .github/patches 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "feat(macos): complete notification service ownership and responsive UI [macos-production-applied]"
+          git push origin HEAD:codex/macos-production-parity-2026-09
