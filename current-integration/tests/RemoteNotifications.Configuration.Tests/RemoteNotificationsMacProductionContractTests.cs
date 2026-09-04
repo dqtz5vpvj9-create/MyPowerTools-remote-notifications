@@ -8,13 +8,13 @@ public sealed class RemoteNotificationsMacProductionContractTests
         Path.Combine(TestPaths.IntegrationRoot, "src", "RemoteNotifications.Service");
 
     [Fact]
-    public void Mac_service_and_surface_share_the_module_data_directory()
+    public void Mac_service_uses_the_remote_notifications_tool_data_directory()
     {
         var manifestPath = Path.Combine(ServiceRoot, "unit-manifest.macos.json");
         using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var root = manifest.RootElement;
         var environment = root.GetProperty("environment");
-        var expected = "~/Library/Application Support/MyPowerTools/state/modules/android-tools.notifications/data";
+        var expected = "~/Library/Application Support/MyPowerTools/state/tools/remote-notifications";
 
         Assert.Equal(expected, environment.GetProperty("MPT_TOOL_DATA_ROOT").GetString());
         Assert.Equal("1", environment.GetProperty("MPT_REMOTE_NOTIFICATIONS_SKIP_LEGACY_IMPORT").GetString());
