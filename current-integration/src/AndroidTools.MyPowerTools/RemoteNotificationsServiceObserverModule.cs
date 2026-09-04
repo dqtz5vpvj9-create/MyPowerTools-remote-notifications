@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using MyPowerTools.Abstractions;
+using MyPowerTools.Protocol;
 using MyPowerTools.RemoteNotifications.Configuration;
 using RemoteNotifications.Surface.Services;
 
