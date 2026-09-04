@@ -26,89 +26,56 @@ public sealed partial class RemoteNotificationsView
     private void UpdateResponsiveLayout()
     {
         var compact = Bounds.Width > 0 && Bounds.Width < CompactToolbarThreshold;
-        var headerActions = this.FindControl<Control>("HeaderActions");
-        var connection = this.FindControl<Control>("ConnectionExpander");
-        var menuButton = this.FindControl<Control>("OverflowMenuButton");
-        var splitView = this.FindControl<SplitView>("ResponsiveSplitView");
-
-        if (headerActions is not null)
+        if (this.FindControl<Control>("HeaderActions") is { } headerActions)
         {
             headerActions.IsVisible = !compact;
         }
-        if (connection is not null)
+        if (this.FindControl<Control>("ConnectionExpander") is { } connection)
         {
             connection.IsVisible = !compact;
         }
-        if (menuButton is not null)
+        if (this.FindControl<Control>("OverflowMenuButton") is { } menuButton)
         {
             menuButton.IsVisible = compact;
-        }
-        if (!compact && splitView is not null)
-        {
-            splitView.IsPaneOpen = false;
         }
     }
 
     private void OnOverflowMenuClick(object? sender, RoutedEventArgs e)
     {
-        if (this.FindControl<SplitView>("ResponsiveSplitView") is { } splitView)
+        if (sender is not Control anchor || DataContext is not RemoteNotificationsViewModel viewModel)
         {
-            splitView.IsPaneOpen = !splitView.IsPaneOpen;
+            return;
         }
-    }
 
-    private void OnCloseOverflowClick(object? sender, RoutedEventArgs e)
-    {
-        CloseResponsivePane();
-    }
-
-    private void OnPaneSearchClick(object? sender, RoutedEventArgs e)
-    {
-        CloseResponsivePane();
-        OnSearchClick(sender, e);
-    }
-
-    private void OnPaneClearClick(object? sender, RoutedEventArgs e)
-    {
-        CloseResponsivePane();
-        OnClearClick(sender, e);
-    }
-
-    private void OnPaneClaudeTaskClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is RemoteNotificationsViewModel viewModel &&
-            viewModel.ShowClaudeTaskCommand.CanExecute(null))
+        var items = new List<MenuItem>();
+        if (viewModel.IsInboxVisible)
         {
-            viewModel.ShowClaudeTaskCommand.Execute(null);
+            items.Add(ActionItem("Search", () => OnSearchClick(anchor, e)));
+            items.Add(ActionItem("Clear all", () => OnClearClick(anchor, e)));
+            items.Add(ActionItem("Claude Task", () => Execute(viewModel.ShowClaudeTaskCommand)));
+            items.Add(ActionItem("Settings", () => Execute(viewModel.ShowSettingsCommand)));
         }
-        CloseResponsivePane();
-    }
-
-    private void OnPaneSettingsClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is RemoteNotificationsViewModel viewModel &&
-            viewModel.ShowSettingsCommand.CanExecute(null))
+        else
         {
-            viewModel.ShowSettingsCommand.Execute(null);
+            items.Add(ActionItem("Back to inbox", () => Execute(viewModel.ShowInboxCommand)));
         }
-        CloseResponsivePane();
+
+        var menu = new ContextMenu { ItemsSource = items };
+        menu.Open(anchor);
     }
 
-    private void OnPaneInboxClick(object? sender, RoutedEventArgs e)
+    private static MenuItem ActionItem(string header, Action action)
     {
-        if (DataContext is RemoteNotificationsViewModel viewModel &&
-            viewModel.ShowInboxCommand.CanExecute(null))
-        {
-            viewModel.ShowInboxCommand.Execute(null);
-        }
-        CloseResponsivePane();
+        var item = new MenuItem { Header = header };
+        item.Click += (_, _) => action();
+        return item;
     }
 
-    private void CloseResponsivePane()
+    private static void Execute(System.Windows.Input.ICommand command)
     {
-        if (this.FindControl<SplitView>("ResponsiveSplitView") is { } splitView)
+        if (command.CanExecute(null))
         {
-            splitView.IsPaneOpen = false;
+            command.Execute(null);
         }
     }
 }
