@@ -22,6 +22,34 @@ internal sealed class MacUserNotificationService : INotificationService
     private const int NativeNoBundle = 2;
     private const int NativeUnavailable = 3;
 
+    private readonly int _initializationStatus;
+
+    public MacUserNotificationService()
+    {
+        if (!OperatingSystem.IsMacOS() || UseRecordingBackend())
+        {
+            _initializationStatus = NativeOk;
+            return;
+        }
+
+        try
+        {
+            // Apple requires the UNUserNotificationCenter delegate to be registered during
+            // application launch. Program.cs creates this service before the polling loop and
+            // control socket start, so notification actions remain routable even when the first
+            // message arrives much later.
+            _initializationStatus = Native.Initialize();
+        }
+        catch (DllNotFoundException)
+        {
+            _initializationStatus = NativeUnavailable;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _initializationStatus = NativeUnavailable;
+        }
+    }
+
     public Task PublishAsync(string title, string body, CancellationToken cancellationToken)
     {
         return PublishAsync(
@@ -53,26 +81,29 @@ internal sealed class MacUserNotificationService : INotificationService
         var body = request.Body ?? "";
         var activationUri = request.ActivationUri ?? "";
 
-        int status;
-        try
+        var status = _initializationStatus;
+        if (status == NativeOk)
         {
-            status = await Task.Run(
-                    () => Native.Publish(
-                        identifier,
-                        title,
-                        body,
-                        activationUri,
-                        NativeTimeoutMilliseconds),
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (DllNotFoundException)
-        {
-            status = NativeUnavailable;
-        }
-        catch (EntryPointNotFoundException)
-        {
-            status = NativeUnavailable;
+            try
+            {
+                status = await Task.Run(
+                        () => Native.Publish(
+                            identifier,
+                            title,
+                            body,
+                            activationUri,
+                            NativeTimeoutMilliseconds),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (DllNotFoundException)
+            {
+                status = NativeUnavailable;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                status = NativeUnavailable;
+            }
         }
 
         if (status == NativeOk)
@@ -191,6 +222,12 @@ internal sealed class MacUserNotificationService : INotificationService
 
     private static class Native
     {
+        [DllImport(
+            "RemoteNotificationsMac",
+            EntryPoint = "remote_notifications_mac_initialize",
+            CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int Initialize();
+
         [DllImport(
             "RemoteNotificationsMac",
             EntryPoint = "remote_notifications_mac_publish",
