@@ -1,4 +1,5 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:shortcuts="using:MyPowerTools.AvaloniaSdk"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="using:MyPowerTools.UI.Controls"
              xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
@@ -163,7 +164,7 @@
                             VerticalAlignment="Center" />
       <controls:MptButton
                           Content="Search"
-                          Click="OnSearchClick"
+                          Click="OnSearchClick" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.search"
                           ToolTip.Tip="Search notification content"
                           IsVisible="{Binding IsInboxVisible}"
                           VerticalAlignment="Center" />
@@ -174,21 +175,21 @@
                           IsVisible="{Binding IsInboxVisible}"
                           VerticalAlignment="Center" />
       <controls:MptButton Content="Claude Task"
-                          Command="{Binding ShowClaudeTaskCommand}"
+                          Command="{Binding ShowClaudeTaskCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.show-claude-task"
                           ToolTip.Tip="Auto-triggered Stops from Claude (task-notification, continue nudges)"
                           IsVisible="{Binding IsInboxVisible}"
                           VerticalAlignment="Center" />
       <Grid>
         <controls:MptButton Content="Settings"
-                            Command="{Binding ShowSettingsCommand}"
+                            Command="{Binding ShowSettingsCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.show-settings"
                             IsVisible="{Binding IsInboxVisible}"
                             VerticalAlignment="Center" />
         <controls:MptButton Content="Back to inbox"
-                            Command="{Binding ShowInboxCommand}"
+                            Command="{Binding ShowInboxCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.show-inbox"
                             IsVisible="{Binding IsSettingsVisible}"
                             VerticalAlignment="Center" />
         <controls:MptButton Content="Back to inbox"
-                            Command="{Binding ShowInboxCommand}"
+                            Command="{Binding ShowInboxCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.show-inbox"
                             IsVisible="{Binding IsClaudeTaskVisible}"
                             VerticalAlignment="Center" />
       </Grid>
@@ -317,12 +318,12 @@
                     Spacing="10"
                     HorizontalAlignment="Right">
           <controls:MptButton Content="Revert changes"
-                              Command="{Binding ResetSettingsCommand}" />
+                              Command="{Binding ResetSettingsCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.reset-settings" />
           <controls:MptButton Content="Test connection and signing"
-                              Command="{Binding TestSettingsCommand}" />
+                              Command="{Binding TestSettingsCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.test-settings" />
           <controls:MptButton Classes="MptPrimaryButton"
                               Content="Save and restart sync"
-                              Command="{Binding SaveSettingsCommand}" />
+                              Command="{Binding SaveSettingsCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.save-settings" />
         </StackPanel>
       </StackPanel>
     </Border>
@@ -352,10 +353,10 @@
                     Spacing="{DynamicResource MptSpacingS}"
                     VerticalAlignment="Center">
           <controls:MptButton Content="{Binding ErrorDetailsActionLabel}"
-                              Command="{Binding ToggleErrorDetailsCommand}" />
+                              Command="{Binding ToggleErrorDetailsCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.toggle-error-details" />
           <controls:MptButton Classes="MptPrimaryButton"
                               Content="Retry sync"
-                              Command="{Binding RetryCommand}" />
+                              Command="{Binding RetryCommand}" shortcuts:MptShortcutHint.CommandId="remote-notifications.ui.retry" />
         </StackPanel>
 
         <ScrollViewer Grid.Row="1"

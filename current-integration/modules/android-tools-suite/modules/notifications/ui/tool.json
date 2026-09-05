@@ -9,12 +9,118 @@
   "type": "dotnet-surface",
   "primaryRouteId": "inbox",
   "routes": [
-    { "routeId": "inbox", "surfaceId": "android-tools.notifications.inbox", "title": "Notifications", "icon": "route.inbox", "surface": { "kind": "dotnet", "assembly": "surface/RemoteNotifications.Surface.dll", "type": "RemoteNotifications.Surface.RemoteNotificationsSurfaceFactory" } }
+    {
+      "routeId": "inbox",
+      "surfaceId": "android-tools.notifications.inbox",
+      "title": "Notifications",
+      "icon": "route.inbox",
+      "surface": {
+        "kind": "dotnet",
+        "assembly": "surface/RemoteNotifications.Surface.dll",
+        "type": "RemoteNotifications.Surface.RemoteNotificationsSurfaceFactory"
+      }
+    }
   ],
   "homeCard": {
     "summary": "Open the live notification stream and filter messages by Codex or Claude session.",
     "primaryActionLabel": "Open Notifications",
     "statusBinding": "module.status",
     "order": 20
-  }
+  },
+  "shortcuts": [
+    {
+      "id": "remote-notifications.ui.retry",
+      "title": "Retry",
+      "context": "",
+      "allowInTextInput": false,
+      "bindings": [
+        {
+          "gesture": "F5",
+          "platform": "all"
+        }
+      ]
+    },
+    {
+      "id": "remote-notifications.ui.show-inbox",
+      "title": "Show Inbox",
+      "context": "",
+      "allowInTextInput": false,
+      "bindings": []
+    },
+    {
+      "id": "remote-notifications.ui.show-settings",
+      "title": "Show Settings",
+      "context": "",
+      "allowInTextInput": false,
+      "bindings": []
+    },
+    {
+      "id": "remote-notifications.ui.show-claude-task",
+      "title": "Show Claude Task",
+      "context": "",
+      "allowInTextInput": false,
+      "bindings": []
+    },
+    {
+      "id": "remote-notifications.ui.save-settings",
+      "title": "Save Settings",
+      "context": "settings",
+      "allowInTextInput": true,
+      "bindings": [
+        {
+          "gesture": "Ctrl+S",
+          "platform": "windows"
+        },
+        {
+          "gesture": "Ctrl+S",
+          "platform": "linux"
+        },
+        {
+          "gesture": "Cmd+S",
+          "platform": "macos"
+        }
+      ]
+    },
+    {
+      "id": "remote-notifications.ui.test-settings",
+      "title": "Test Settings",
+      "context": "settings",
+      "allowInTextInput": false,
+      "bindings": []
+    },
+    {
+      "id": "remote-notifications.ui.reset-settings",
+      "title": "Reset Settings",
+      "context": "settings",
+      "allowInTextInput": false,
+      "bindings": []
+    },
+    {
+      "id": "remote-notifications.ui.toggle-error-details",
+      "title": "Toggle Error Details",
+      "context": "",
+      "allowInTextInput": false,
+      "bindings": []
+    },
+    {
+      "id": "remote-notifications.ui.search",
+      "title": "Search notifications",
+      "context": "",
+      "allowInTextInput": true,
+      "bindings": [
+        {
+          "gesture": "Ctrl+F",
+          "platform": "windows"
+        },
+        {
+          "gesture": "Ctrl+F",
+          "platform": "linux"
+        },
+        {
+          "gesture": "Cmd+F",
+          "platform": "macos"
+        }
+      ]
+    }
+  ]
 }
