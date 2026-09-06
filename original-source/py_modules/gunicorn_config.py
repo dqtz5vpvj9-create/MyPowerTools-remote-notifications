@@ -32,3 +32,6 @@ loglevel = 'info'
 workers = 1
 threads = 1
 worker_class = 'gevent'
+
+# Reuse notification polling connections instead of repeating TLS handshakes.
+keepalive = 120

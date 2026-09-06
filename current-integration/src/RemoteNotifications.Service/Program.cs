@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
+using System.Threading.Channels;
 using System.Security;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -73,6 +75,15 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
 var pid = Environment.ProcessId;
 Console.WriteLine($"RemoteNotifications.Service starting pid={pid} endpoint={socketPath ?? pipeName}");
 
+var networkChanges = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+{ FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+void NetworkChanged(object? sender, EventArgs args)
+{
+    RemoteNotificationHttpPoller.ResetConnectionsAfterNetworkChange();
+    networkChanges.Writer.TryWrite(0);
+}
+if (OperatingSystem.IsMacOS()) NetworkChange.NetworkAddressChanged += NetworkChanged;
+
 var state = new WorkerState();
 var pollGate = new object();
 var startupBackfillPending = true;
@@ -121,7 +132,15 @@ try
         try
         {
             var delaySeconds = state.NextPollDelaySeconds;
-            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cts.Token);
+            if (OperatingSystem.IsMacOS())
+            {
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                wait.CancelAfter(TimeSpan.FromSeconds(delaySeconds));
+                try { await networkChanges.Reader.WaitToReadAsync(wait.Token); }
+                catch (OperationCanceledException) when (!cts.IsCancellationRequested) { }
+                while (networkChanges.Reader.TryRead(out _)) { }
+            }
+            else await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cts.Token);
         }
         catch (TaskCanceledException)
         {
@@ -134,6 +153,7 @@ catch (OperationCanceledException)
     // expected on stop
 }
 
+if (OperatingSystem.IsMacOS()) NetworkChange.NetworkAddressChanged -= NetworkChanged;
 Console.WriteLine($"RemoteNotifications.Service stopping pid={pid}");
 return 0;
 

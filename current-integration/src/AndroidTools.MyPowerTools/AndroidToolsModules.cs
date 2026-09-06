@@ -16,6 +16,8 @@ namespace AndroidTools.MyPowerTools;
 public sealed class AndroidToolsRemoteCommandsModule : AndroidToolsModuleBase
 {
     private JsonObject _settings = RemoteDefaultSettings();
+    private readonly Channel<byte> _catalogChanges = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+    { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
 
     public override string Id => "android-tools.remote-commands";
     public override string DisplayName => "Remote Commands";
@@ -134,7 +136,9 @@ public sealed class AndroidToolsRemoteCommandsModule : AndroidToolsModuleBase
 
     protected override async IAsyncEnumerable<MptModuleEvent> BuildModuleEventsAsync(EventCursor cursor, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await Task.CompletedTask;
+        using var files = OperatingSystem.IsMacOS()
+            ? new CommandFileChanges(Shared.RemoteCommandObservedPaths(ConfiguredCatalogPath()), _catalogChanges.Writer)
+            : null;
         var seq = Math.Max(1UL, cursor.LastEventSeq);
         var catalog = LoadCatalog();
         var history = Shared.LoadRemoteCommandHistorySummary();
@@ -158,7 +162,14 @@ public sealed class AndroidToolsRemoteCommandsModule : AndroidToolsModuleBase
 
         while (true)
         {
-            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            if (files is null)
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            else
+            {
+                await _catalogChanges.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false);
+                while (_catalogChanges.Reader.TryRead(out _)) { }
+                files.Observe(Shared.RemoteCommandObservedPaths(ConfiguredCatalogPath()));
+            }
             catalog = LoadCatalog();
             history = Shared.LoadRemoteCommandHistorySummary();
             var nextFingerprint = $"{catalog.Commands.Count}|{history.MyPowerToolsHistoryCount}|{catalog.SourceKind}";
@@ -208,14 +219,17 @@ public sealed class AndroidToolsRemoteCommandsModule : AndroidToolsModuleBase
     public override ValueTask<SettingsSnapshotDocument> ApplySettingsAsync(SettingsSnapshotDocument snapshot, CancellationToken cancellationToken)
     {
         _settings = SettingsJson.Merge(RemoteDefaultSettings(), snapshot.Values);
+        _catalogChanges.Writer.TryWrite(0);
         return ValueTask.FromResult(snapshot with { Values = (JsonObject)_settings.DeepClone() });
     }
 
-    private CommandCatalog LoadCatalog()
+    private string? ConfiguredCatalogPath()
     {
         var path = SettingsJson.ReadString(_settings, "commandsYamlPath");
-        return Shared.LoadCommandCatalog(string.Equals(path, "auto", StringComparison.OrdinalIgnoreCase) ? null : path);
+        return string.Equals(path, "auto", StringComparison.OrdinalIgnoreCase) ? null : path;
     }
+
+    private CommandCatalog LoadCatalog() => Shared.LoadCommandCatalog(ConfiguredCatalogPath());
 
     private CommandExecutionResult ExecutePythonTool(CommandRequest request, PowerToolCommand command)
     {
@@ -1099,6 +1113,11 @@ public sealed class AndroidToolsSharedRuntime
             return new CommandCatalog([], $"commands.yaml import failed: {MptLogRedactor.Redact(ex.Message)}", source.SourceKind);
         }
     }
+
+    internal IEnumerable<string> RemoteCommandObservedPaths(string? configuredPath) =>
+        CommandsYamlCandidates(configuredPath).Concat(LegacyFileCandidates("powertool", "history.db"))
+            .Select(file => file.Path).OfType<string>()
+            .Append(Path.Combine(DataRoot, "remote-command-history.jsonl"));
 
     internal RemoteCommandHistorySummary LoadRemoteCommandHistorySummary()
     {

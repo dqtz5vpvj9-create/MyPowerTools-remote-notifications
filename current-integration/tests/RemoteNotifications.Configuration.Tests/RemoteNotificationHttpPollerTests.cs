@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using RemoteNotifications.Surface.Services;
 using Org.BouncyCastle.Crypto.Signers;
@@ -7,6 +8,57 @@ namespace RemoteNotifications.Configuration.Tests;
 
 public sealed class RemoteNotificationHttpPollerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Polling_recovers_from_a_closed_connection_and_a_network_pool_reset(bool networkChanged)
+    {
+        using var key = TestSigningKey.Create();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var endpoint = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
+        var server = Task.Run(async () =>
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                using var connection = await listener.AcceptTcpClientAsync(deadline.Token);
+                await using var stream = connection.GetStream();
+                using var reader = new StreamReader(stream, leaveOpen: true);
+                while (!string.IsNullOrEmpty(await reader.ReadLineAsync(deadline.Token))) { }
+                var body = "{\"notifications\":[{\"id\":\"recovered\",\"message\":\"received\"}]}";
+                var response = Encoding.UTF8.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {Encoding.UTF8.GetByteCount(body)}\r\nContent-Type: application/json\r\nConnection: keep-alive\r\n\r\n{body}");
+                await stream.WriteAsync(response, deadline.Token);
+                // Peer closes the advertised persistent connection, as happens on a route loss.
+            }
+        }, deadline.Token);
+        var poller = new RemoteNotificationHttpPoller(privateKeyPath: key.Path, endpoint: endpoint, channel: "default");
+        Assert.Equal("ok", (await poller.PullAsync("", deadline.Token)).State);
+        if (networkChanged) RemoteNotificationHttpPoller.ResetConnectionsAfterNetworkChange();
+        var recovered = await poller.PullAsync("", deadline.Token);
+        Assert.Equal("ok", recovered.State);
+        Assert.Equal("received", Assert.Single(recovered.Notifications).Message);
+        await server;
+    }
+
+    [Fact]
+    public void Cached_handshake_observes_a_replaced_signing_key()
+    {
+        using var first = TestSigningKey.Create();
+        using var replacement = TestSigningKey.Create(seedOffset: 32);
+        var original = RemoteNotificationSshSigner.SignHandshake(first.Path);
+        Assert.Same(original, RemoteNotificationSshSigner.SignHandshake(first.Path));
+        File.WriteAllText(first.Path, File.ReadAllText(replacement.Path));
+        File.SetLastWriteTimeUtc(first.Path, DateTime.UtcNow.AddSeconds(2));
+        var updated = RemoteNotificationSshSigner.SignHandshake(first.Path);
+        Assert.NotEqual(original, updated);
+        var verifier = new Ed25519Signer();
+        verifier.Init(false, replacement.PrivateKey.GeneratePublicKey());
+        var hello = Encoding.ASCII.GetBytes("hello");
+        verifier.BlockUpdate(hello, 0, hello.Length);
+        Assert.True(verifier.VerifySignature(DecodeUrlSafeBase64(updated)));
+    }
+
     [Fact]
     public void Dotnet_signer_preserves_the_original_ed25519_hello_protocol()
     {

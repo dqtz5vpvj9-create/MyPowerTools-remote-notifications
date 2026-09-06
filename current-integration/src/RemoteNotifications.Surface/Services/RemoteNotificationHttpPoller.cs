@@ -22,16 +22,26 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
     private const int PullLimit = 20;
     private const int MaximumAttempts = 3;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
-    private static readonly HttpClient SharedHttpClient = new()
+    private static HttpClient _sharedHttpClient = CreateHttpClient();
+
+    private static HttpClient CreateHttpClient() => new(new SocketsHttpHandler
     {
-        Timeout = Timeout.InfiniteTimeSpan
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(30),
+        MaxConnectionsPerServer = 2,
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+    })
+    {
+        Timeout = Timeout.InfiniteTimeSpan,
+        DefaultRequestVersion = HttpVersion.Version20,
+        DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
     };
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient? _httpClient;
     private readonly string _endpoint;
     private readonly string _privateKeyPath;
     private readonly string _channel;
@@ -54,8 +64,11 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
         string? endpoint = null,
         string? channel = null)
     {
-        var defaults = new RemoteNotificationSettingsStore().Load();
-        _httpClient = httpClient ?? SharedHttpClient;
+        var defaults = string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(privateKeyPath) ||
+                       string.IsNullOrWhiteSpace(channel)
+            ? new RemoteNotificationSettingsStore().Load()
+            : RemoteNotificationSettings.Default;
+        _httpClient = httpClient;
         _endpoint = string.IsNullOrWhiteSpace(endpoint)
             ? defaults.Endpoint
             : endpoint.TrimEnd('/');
@@ -119,15 +132,26 @@ sealed partial class RemoteNotificationHttpPoller : IRemoteNotificationPoller
         }
     }
 
+    public static void ResetConnectionsAfterNetworkChange()
+    {
+        // Dispose pooled sockets from the old route; DNS and TLS are resolved on the new route.
+        Interlocked.Exchange(ref _sharedHttpClient, CreateHttpClient()).Dispose();
+    }
+
     private async Task<RemoteNotificationPullResult> SendOnceAsync(
         Uri requestUri,
         CancellationToken cancellationToken)
     {
+        var client = _httpClient ?? Volatile.Read(ref _sharedHttpClient);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(RequestTimeout);
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri)
+        {
+            Version = client.DefaultRequestVersion,
+            VersionPolicy = client.DefaultVersionPolicy
+        };
         request.Headers.UserAgent.ParseAdd("MyPowerTools/RemoteNotifications");
-        using var response = await _httpClient.SendAsync(
+        using var response = await client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 timeout.Token)
@@ -282,7 +306,28 @@ static class RemoteNotificationSshSigner
 {
     private static readonly byte[] Handshake = Encoding.ASCII.GetBytes("hello");
 
+    private sealed record CachedHandshake(string Path, DateTime LastWriteUtc, long Length, string Signature);
+    private static readonly object CacheGate = new();
+    private static CachedHandshake? _cached;
+
     public static string SignHandshake(string privateKeyPath)
+    {
+        // The protocol signs the fixed text "hello". Cache that deterministic result,
+        // not private key material; key replacement invalidates it immediately.
+        lock (CacheGate)
+        {
+            var file = new FileInfo(privateKeyPath);
+            if (!file.Exists) throw new FileNotFoundException("The SSH signing key was not found at the configured path.", privateKeyPath);
+            if (_cached is { } cached && cached.Path == file.FullName &&
+                cached.LastWriteUtc == file.LastWriteTimeUtc && cached.Length == file.Length)
+                return cached.Signature;
+            var signature = SignHandshakeCore(privateKeyPath);
+            _cached = new(file.FullName, file.LastWriteTimeUtc, file.Length, signature);
+            return signature;
+        }
+    }
+
+    private static string SignHandshakeCore(string privateKeyPath)
     {
         if (!File.Exists(privateKeyPath))
         {

@@ -168,6 +168,8 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
     }
 
     public string SettingsPath { get; }
+    private sealed record CachedSettings(DateTime LastWriteUtc, long Length, RemoteNotificationSettingsValidation Validation);
+    private CachedSettings? _cached;
 
     public RemoteNotificationSettings Load()
     {
@@ -186,6 +188,10 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
 
         try
         {
+            var file = new FileInfo(SettingsPath);
+            var stamp = (file.LastWriteTimeUtc, file.Length);
+            var cached = Volatile.Read(ref _cached);
+            if (cached is not null && (cached.LastWriteUtc, cached.Length) == stamp) return cached.Validation;
             var loaded = JsonSerializer.Deserialize<RemoteNotificationSettings>(
                 File.ReadAllText(SettingsPath),
                 JsonOptions);
@@ -195,7 +201,9 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
             }
 
             var normalized = loaded.Normalize();
-            return normalized.Validate();
+            var result = normalized.Validate();
+            Volatile.Write(ref _cached, new CachedSettings(stamp.LastWriteTimeUtc, stamp.Length, result));
+            return result;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -220,6 +228,7 @@ sealed class RemoteNotificationSettingsStore : IRemoteNotificationSettingsStore
         {
             File.WriteAllText(temporaryPath, JsonSerializer.Serialize(validation.Settings, JsonOptions));
             File.Move(temporaryPath, SettingsPath, overwrite: true);
+            Volatile.Write(ref _cached, null);
         }
         finally
         {

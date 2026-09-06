@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using MyPowerTools.Abstractions;
@@ -209,6 +210,8 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
     {
         ThrowIfDisposed();
         var sequence = Math.Max(1UL, cursor.LastEventSeq);
+        using var historyChanges = new HistoryChanges(_sharedDataDirectory);
+        var nextRecoveryScan = DateTimeOffset.UtcNow.AddMinutes(1);
         var observedSnapshot = LoadSnapshot().Value;
         var observedIds = observedSnapshot.MessagesOldestFirst
             .Select(RemoteNotificationsLegacyStore.StableId)
@@ -233,8 +236,10 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
-            var current = LoadSnapshot();
+            var historyChanged = await historyChanges.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var recover = DateTimeOffset.UtcNow >= nextRecoveryScan;
+            var current = historyChanged || recover ? LoadSnapshot() : (Value: observedSnapshot, Error: "");
+            if (historyChanged || recover) nextRecoveryScan = DateTimeOffset.UtcNow.AddMinutes(1);
             if (current.Error.Length == 0 && !ReferenceEquals(current.Value, observedSnapshot))
             {
                 observedSnapshot = current.Value;
@@ -299,6 +304,41 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
                     ["state"] = state
                 });
         }
+    }
+
+    private sealed class HistoryChanges : IDisposable
+    {
+        private readonly Channel<byte> _signals = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
+        { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+        private readonly FileSystemWatcher _watcher;
+
+        public HistoryChanges(string directory)
+        {
+            _watcher = new FileSystemWatcher(directory, "history.json")
+            { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size };
+            _watcher.Changed += (_, _) => _signals.Writer.TryWrite(0);
+            _watcher.Created += (_, _) => _signals.Writer.TryWrite(0);
+            _watcher.Deleted += (_, _) => _signals.Writer.TryWrite(0);
+            _watcher.Renamed += (_, _) => _signals.Writer.TryWrite(0);
+            _watcher.Error += (_, _) => _signals.Writer.TryWrite(0);
+            _watcher.EnableRaisingEvents = true;
+        }
+
+        public async Task<bool> WaitAsync(CancellationToken cancellationToken)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                if (!await _signals.Reader.WaitToReadAsync(timeout.Token).ConfigureAwait(false)) return false;
+                while (_signals.Reader.TryRead(out _)) { }
+                return true;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { return false; }
+        }
+
+        public void Dispose() { _watcher.Dispose(); _signals.Writer.TryComplete(); }
     }
 
     internal static string ResolveSharedToolDataDirectory(string moduleDataDirectory)

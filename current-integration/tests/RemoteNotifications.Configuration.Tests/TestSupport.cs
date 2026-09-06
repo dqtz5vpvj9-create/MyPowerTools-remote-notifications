@@ -49,11 +49,11 @@ internal sealed class TestSigningKey : IDisposable
 
     public Ed25519PrivateKeyParameters PrivateKey { get; }
 
-    public static TestSigningKey Create()
+    public static TestSigningKey Create(int seedOffset = 0)
     {
         var directory = TestDirectory.Create();
         var path = System.IO.Path.Combine(directory.Path, "id_ed25519");
-        var seed = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+        var seed = Enumerable.Range(1, 32).Select(value => (byte)(value + seedOffset)).ToArray();
         var privateKey = new Ed25519PrivateKeyParameters(seed);
         var keyBlob = OpenSshPrivateKeyUtilities.EncodePrivateKey(privateKey);
         using (var writer = File.CreateText(path))
