@@ -36,6 +36,8 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
     private string _waterline;
     private CancellationTokenSource? _serviceRefreshCancellation;
     private RemoteNotificationRecord? _latestSystemHealth;
+    private RemoteNotificationsSnapshot? _lastObservedSnapshot;
+    private DateTimeOffset _lastRelativeTimeRefresh;
 
     public RemoteNotificationsViewModel(
         RemoteNotificationsSnapshot snapshot,
@@ -446,8 +448,18 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
     private void ReloadPersistedSnapshot()
     {
-        var visibleBefore = CaptureVisibleMessageSources();
         var snapshot = _store.Load();
+        if (ReferenceEquals(snapshot, _lastObservedSnapshot))
+        {
+            if (DateTimeOffset.UtcNow - _lastRelativeTimeRefresh >= TimeSpan.FromSeconds(15))
+            {
+                foreach (var message in Messages) message.RefreshRelativeTime();
+                _lastRelativeTimeRefresh = DateTimeOffset.UtcNow;
+            }
+            return;
+        }
+        var visibleBefore = CaptureVisibleMessageSources();
+        _lastObservedSnapshot = snapshot;
         ObserveSystemHealth(snapshot.MessagesOldestFirst);
         var persistedNewestFirst = snapshot.MessagesOldestFirst.Reverse().ToArray();
         var currentSources = Messages.Select(message => message.Source).ToArray();
@@ -477,6 +489,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         {
             message.RefreshRelativeTime();
         }
+        _lastRelativeTimeRefresh = DateTimeOffset.UtcNow;
         NotifyMessageViewChanged(HasVisibleMessageSourcesChanged(visibleBefore));
     }
 

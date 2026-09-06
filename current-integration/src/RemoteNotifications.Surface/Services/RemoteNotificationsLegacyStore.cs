@@ -137,6 +137,15 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
     private readonly IRemoteNotificationSettingsStore _settingsStore;
     private readonly string? _statePath;
     private readonly bool _importLegacyRegistry;
+    // One bounded inbox snapshot per store; the file remains authoritative across processes.
+    private RemoteNotificationsSnapshot? _cachedSnapshot;
+    private (DateTime LastWriteUtc, long Length) _cachedStamp;
+
+    private (DateTime LastWriteUtc, long Length) HistoryStamp()
+    {
+        var file = new FileInfo(_statePath!);
+        return (file.LastWriteTimeUtc, file.Length);
+    }
 
     public RemoteNotificationsLegacyStore(
         IRemoteNotificationSettingsStore? settingsStore = null,
@@ -166,6 +175,12 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
             {
                 if (File.Exists(_statePath))
                 {
+                    var stamp = HistoryStamp();
+                    if (_cachedSnapshot is not null && stamp == _cachedStamp &&
+                        _cachedSnapshot.PersistentWindowsToasts == productSettings.KeepWindowsBanners)
+                    {
+                        return _cachedSnapshot;
+                    }
                     var state = ReadFileStateUnsafe();
                     var before = state.Messages;
                     var beforeSeen = state.SeenMessageIds.ToArray();
@@ -177,7 +192,9 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
                         state.KnownLabels = LabelsFor(state.Messages);
                         WriteFileStateUnsafe(state);
                     }
-                    return ToSnapshot(state, productSettings.KeepWindowsBanners);
+                    _cachedSnapshot = ToSnapshot(state, productSettings.KeepWindowsBanners);
+                    _cachedStamp = HistoryStamp();
+                    return _cachedSnapshot;
                 }
 
                 var imported = _importLegacyRegistry
@@ -471,6 +488,7 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
     private void WriteFileStateUnsafe(PersistedState state)
     {
+        _cachedSnapshot = null;
         var statePath = _statePath
             ?? throw new InvalidOperationException("Remote notification history path is unavailable.");
         var directory = Path.GetDirectoryName(statePath)
