@@ -13,6 +13,8 @@ public partial class RemoteNotificationsView : IMptShortcutCommandSource
         if (DataContext is not RemoteNotificationsViewModel vm) return [];
         return
         [
+            new("remote-notifications.ui.copy-timeline", CopyFilteredTimelineAsync, () => vm.VisibleMessages.Count > 0 && !vm.IsSettingsVisible),
+            new("remote-notifications.ui.mark-visible-read", () => { vm.MarkVisibleMessagesAsRead(); return Task.CompletedTask; }, () => vm.VisibleMessages.Count > 0 && !vm.IsSettingsVisible),
             MptShortcutCommand.FromCommand("remote-notifications.ui.retry", vm.RetryCommand),
             MptShortcutCommand.FromCommand("remote-notifications.ui.show-inbox", vm.ShowInboxCommand),
             MptShortcutCommand.FromCommand("remote-notifications.ui.show-settings", vm.ShowSettingsCommand),

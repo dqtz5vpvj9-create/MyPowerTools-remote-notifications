@@ -747,6 +747,14 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
             return "Check the device signing key, then retry synchronization.";
         }
 
+        if (error.Contains("localhost:80", StringComparison.OrdinalIgnoreCase) &&
+            (error.Contains("Connection refused", StringComparison.OrdinalIgnoreCase) ||
+             error.Contains("Error starting gRPC call", StringComparison.OrdinalIgnoreCase) ||
+             error.Contains("StatusCode=\"Unavailable\"", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "The local MyPowerTools service is unavailable. Restart the app, then retry.";
+        }
+
         var meaningfulLine = error
             .Replace('\r', '\n')
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

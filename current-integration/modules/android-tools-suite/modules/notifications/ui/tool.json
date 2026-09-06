@@ -121,6 +121,33 @@
           "platform": "macos"
         }
       ]
+    },
+    {
+      "id": "remote-notifications.ui.copy-timeline",
+      "title": "Copy filtered notification timeline",
+      "context": "inbox",
+      "allowInTextInput": false,
+      "bindings": [
+        {
+          "gesture": "Ctrl+Shift+C",
+          "platform": "windows"
+        },
+        {
+          "gesture": "Ctrl+Shift+C",
+          "platform": "linux"
+        },
+        {
+          "gesture": "Cmd+Shift+C",
+          "platform": "macos"
+        }
+      ]
+    },
+    {
+      "id": "remote-notifications.ui.mark-visible-read",
+      "title": "Mark visible notifications as read",
+      "context": "inbox",
+      "allowInTextInput": false,
+      "bindings": []
     }
   ]
 }

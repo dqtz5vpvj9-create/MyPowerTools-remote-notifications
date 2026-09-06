@@ -110,7 +110,15 @@ public sealed class RemoteNotificationMessageViewModel : MyPowerTools.AvaloniaSd
     public string FallbackId => RemoteNotificationsLegacyStore.FallbackId(Source);
     public string Channel => string.IsNullOrWhiteSpace(Source.Channel) ? "default" : Source.Channel;
     public string Message => Source.Message;
-    public string DisplayMessage => RemoveLeadingLabel(Source.Message, Label);
+    public string DisplayMessage
+    {
+        get
+        {
+            var parts = RemoteNotificationsLegacyStore.SplitQuotedRequest(Source.Message);
+            var body = RemoveLeadingLabel(parts.ReplyBody, Label);
+            return RemoteNotificationsLegacyStore.AttachQuotedRequest(body, parts.QuotedRequest);
+        }
+    }
     public string Icon => string.IsNullOrWhiteSpace(Source.Icon) ? "info" : Source.Icon.ToLowerInvariant();
     public string Timestamp => Source.Timestamp;
     public string SessionId => Source.SessionId;

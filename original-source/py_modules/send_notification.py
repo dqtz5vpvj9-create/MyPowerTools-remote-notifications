@@ -729,8 +729,16 @@ def _dsh_last_user_message(transcript_path: str) -> str:
     return last
 
 
+QUOTED_REQUEST_REFERENCE_HEADING = "For reference"
+
+
 def _quote_request(request: str) -> str:
     return "\n".join(f"> {line}" for line in request.splitlines())
+
+
+def _attach_quoted_request(reply: str, request: str) -> str:
+    quote = _quote_request(request)
+    return f"{reply}\n\n---\n\n{QUOTED_REQUEST_REFERENCE_HEADING}:\n\n{quote}"
 
 
 def format_stop_message(data: dict, client: str = "claude") -> str:
@@ -785,9 +793,8 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
             request = objective
     request = _clean_user_request(request)
     if request and not claude_task:
-        quote = _quote_request(request)
-        body = f"{quote}\n\n[{label}] {last_msg or 'Task completed'}"
-        return body
+        reply = f"[{label}] {last_msg or 'Task completed'}"
+        return _attach_quoted_request(reply, request)
     if last_msg:
         return f"[{label}] {last_msg}"
     return f"[{label}] Task completed"

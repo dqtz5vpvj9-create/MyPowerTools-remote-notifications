@@ -332,8 +332,11 @@ def test_codex_stop_message_quotes_user_request(tmp_path, monkeypatch):
         "last_assistant_message": "这是回复",
     }
     message = module.format_stop_message(payload, "codex")
+    assert message.startswith("[")
     assert "> 把全文发给我" in message
     assert "这是回复" in message
+    assert "For reference:" in message
+    assert message.index("这是回复") < message.index("> 把全文发给我")
 
 
 def _write_codex_session_meta(path, payload):
@@ -573,8 +576,10 @@ def test_cursor_stop_message_reads_transcript(tmp_path):
     }
     assert module._is_cursor_payload(payload)
     message = module.format_stop_message(payload, "cursor")
-    assert message.startswith("> 修一下通知正文")
-    assert "[MyPowerTools] 已经从 transcript 取出 Cursor Remote 的回复。" in message
+    assert message.startswith("[MyPowerTools] 已经从 transcript 取出 Cursor Remote 的回复。")
+    assert "> 修一下通知正文" in message
+    assert "For reference:" in message
+    assert message.index("[MyPowerTools]") < message.index("> 修一下通知正文")
 
 
 def test_cursor_payload_overrides_claude_client(tmp_path):
@@ -608,6 +613,11 @@ def test_banner_text_omits_quoted_user_request():
     assert banner == "[来自 transcript 的标题] 分析完成"
     assert "请分析" not in banner
     assert "第二行" not in banner
+
+    trailing = "[来自 transcript 的标题] 分析完成\n\n---\n\nFor reference:\n\n> 请分析 Choreo 报告\n> 第二行"
+    trailing_banner = strip_leading_quoted_request(trailing)
+    assert trailing_banner == "[来自 transcript 的标题] 分析完成"
+    assert "请分析" not in trailing_banner
 
     plain = "[build] complete"
     assert strip_leading_quoted_request(plain) == plain
