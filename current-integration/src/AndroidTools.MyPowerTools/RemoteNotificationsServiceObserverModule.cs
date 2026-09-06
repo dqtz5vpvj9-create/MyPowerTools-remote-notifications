@@ -209,7 +209,8 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
     {
         ThrowIfDisposed();
         var sequence = Math.Max(1UL, cursor.LastEventSeq);
-        var observedIds = LoadSnapshot().Value.MessagesOldestFirst
+        var observedSnapshot = LoadSnapshot().Value;
+        var observedIds = observedSnapshot.MessagesOldestFirst
             .Select(RemoteNotificationsLegacyStore.StableId)
             .ToHashSet(StringComparer.Ordinal);
         var serviceFingerprint = "";
@@ -234,8 +235,9 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
         {
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
             var current = LoadSnapshot();
-            if (current.Error.Length == 0)
+            if (current.Error.Length == 0 && !ReferenceEquals(current.Value, observedSnapshot))
             {
+                observedSnapshot = current.Value;
                 foreach (var notification in current.Value.MessagesOldestFirst)
                 {
                     var id = RemoteNotificationsLegacyStore.StableId(notification);

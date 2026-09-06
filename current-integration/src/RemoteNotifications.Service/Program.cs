@@ -120,7 +120,7 @@ try
 
         try
         {
-            var delaySeconds = Math.Clamp(state.CurrentPollIntervalSeconds, 5, 3600);
+            var delaySeconds = state.NextPollDelaySeconds;
             await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cts.Token);
         }
         catch (TaskCanceledException)
@@ -730,12 +730,29 @@ sealed class WorkerState
     private int _lastFetched;
     private int _lastShown;
     private int _injectCount;
+    private int _consecutiveFailures;
     private int _pollIntervalSeconds = RemoteNotificationSettings.DefaultPollIntervalSeconds;
     private DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
 
     public int CurrentPollIntervalSeconds
     {
         get { lock (_gate) { return _pollIntervalSeconds; } }
+    }
+
+    public int NextPollDelaySeconds
+    {
+        get
+        {
+            lock (_gate)
+            {
+                // Keep normal delivery latency. Only repeated offline failures
+                // back off, and a manual poll remains immediately available.
+                if (!OperatingSystem.IsMacOS() || _consecutiveFailures == 0)
+                    return _pollIntervalSeconds;
+                return Math.Max(_pollIntervalSeconds,
+                    Math.Min(60, _pollIntervalSeconds * (1 << Math.Min(_consecutiveFailures, 4))));
+            }
+        }
     }
 
     public void ApplySettings(RemoteNotificationSettings settings)
@@ -750,6 +767,7 @@ sealed class WorkerState
     {
         lock (_gate)
         {
+            _consecutiveFailures = state is "ok" or "idle" ? 0 : Math.Min(4, _consecutiveFailures + 1);
             _connectionState = state;
             _lastError = error;
             _totalAccepted += accepted;
@@ -786,6 +804,7 @@ sealed class WorkerState
     {
         lock (_gate)
         {
+            _consecutiveFailures = Math.Min(4, _consecutiveFailures + 1);
             _connectionState = "error";
             _lastError = message;
             _lastPoll = DateTimeOffset.Now.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
