@@ -121,12 +121,17 @@ try
             try { Console.Error.WriteLine($"RemoteNotifications.Service poll error: {ex.Message}"); } catch { }
         }
 
-        var heartbeat = $"heartbeat pid={pid} ts={DateTimeOffset.UtcNow:O}";
-        Console.WriteLine(heartbeat);
-        if (!string.IsNullOrEmpty(heartbeatFile))
+        // macOS readiness uses the live control socket. Rewriting a heartbeat
+        // every successful empty poll only wakes the supervisor/log consumers.
+        if (!OperatingSystem.IsMacOS())
         {
-            try { await File.AppendAllTextAsync(heartbeatFile, heartbeat + Environment.NewLine, cts.Token); }
-            catch { /* heartbeat file is best-effort */ }
+            var heartbeat = $"heartbeat pid={pid} ts={DateTimeOffset.UtcNow:O}";
+            Console.WriteLine(heartbeat);
+            if (!string.IsNullOrEmpty(heartbeatFile))
+            {
+                try { await File.AppendAllTextAsync(heartbeatFile, heartbeat + Environment.NewLine, cts.Token); }
+                catch { /* heartbeat file is best-effort */ }
+            }
         }
 
         try
@@ -187,7 +192,12 @@ static bool RunOnePollCycle(
     // A full historical reconstruction is needed only when no trustworthy server
     // cursor exists. A normal worker restart resumes from the persisted cursor so
     // messages received during downtime still produce one desktop notification.
-    var persistedWaterline = ResolveWaterline(snapshot.MessagesOldestFirst);
+    if (!ReferenceEquals(state.WaterlineSnapshot, snapshot))
+    {
+        state.PersistedWaterline = ResolveWaterline(snapshot.MessagesOldestFirst);
+        state.WaterlineSnapshot = snapshot;
+    }
+    var persistedWaterline = state.PersistedWaterline;
     var performBackfill = startupBackfill && string.IsNullOrWhiteSpace(persistedWaterline);
     var waterline = performBackfill ? "" : persistedWaterline;
     var pull = poller.PullAsync(
@@ -734,6 +744,8 @@ sealed class WorkerState
     // detected by the store. Poll cycles are serialized by pollGate.
     public RemoteNotificationSettingsStore SettingsStore { get; } = new();
     public RemoteNotificationsLegacyStore InboxStore { get; }
+    public RemoteNotificationsSnapshot? WaterlineSnapshot { get; set; }
+    public string PersistedWaterline { get; set; } = "";
 
     public WorkerState()
     {
