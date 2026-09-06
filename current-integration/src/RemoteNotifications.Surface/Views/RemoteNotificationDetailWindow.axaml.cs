@@ -67,6 +67,17 @@ public sealed partial class RemoteNotificationDetailWindow : Window
               window.webkit.messageHandlers.close.postMessage(message);
             }
           }
+          function openClickedLink(event) {
+            if (!event.isTrusted || (event.button !== 0 && event.button !== 1)) { return; }
+            var anchor = event.target.closest && event.target.closest("a[href]");
+            if (!anchor || anchor.getAttribute("href").startsWith("#")) { return; }
+            var uri = new URL(anchor.href, document.baseURI);
+            if (uri.protocol !== "http:" && uri.protocol !== "https:") { return; }
+            event.preventDefault();
+            post("open-external:" + uri.href);
+          }
+          document.addEventListener("click", openClickedLink);
+          document.addEventListener("auxclick", openClickedLink);
           function isEditable(node) {
             while (node) {
               if (node.isContentEditable) { return true; }
@@ -286,7 +297,19 @@ public sealed partial class RemoteNotificationDetailWindow : Window
 
     private void OnWebMessageReceived(object? sender, WebMessageReceivedEventArgs e)
     {
-        switch (e.Body?.Trim().ToLowerInvariant())
+        var message = e.Body?.Trim();
+        const string openPrefix = "open-external:";
+        if (message?.StartsWith(openPrefix, StringComparison.Ordinal) == true)
+        {
+            if (Uri.TryCreate(message[openPrefix.Length..], UriKind.Absolute, out var uri) &&
+                uri.Scheme is "http" or "https")
+            {
+                OpenExternal(uri);
+            }
+            return;
+        }
+
+        switch (message?.ToLowerInvariant())
         {
             case "close":
                 Close();
@@ -357,17 +380,16 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             return;
         }
 
+        // NativeWebView also reports internal HTML loads (its default base is
+        // http://localhost:12345/). Navigation alone is not a user link click.
         e.Cancel = true;
-        OpenExternal(e.Request);
     }
 
     private void OnWebViewNewWindowRequested(object? sender, WebViewNewWindowRequestedEventArgs e)
     {
+        // Trusted link clicks are handled by the document bridge, including
+        // target=_blank. Never turn an automatic popup into a browser launch.
         e.Handled = true;
-        if (e.Request is { Scheme: "http" or "https" })
-        {
-            OpenExternal(e.Request);
-        }
     }
 
     private static void OpenExternal(Uri uri)
