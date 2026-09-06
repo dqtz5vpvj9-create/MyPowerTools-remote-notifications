@@ -146,7 +146,7 @@ static bool RunOnePollCycle(
     INotificationService? desktopNotifications,
     bool startupBackfill = false)
 {
-    var settingsStore = new RemoteNotificationSettingsStore();
+    var settingsStore = state.SettingsStore;
     var validation = settingsStore.LoadValidation();
     if (!validation.IsValid || validation.Settings is null)
     {
@@ -160,7 +160,7 @@ static bool RunOnePollCycle(
     var settings = validation.Settings;
     state.ApplySettings(settings);
 
-    var store = new RemoteNotificationsLegacyStore(settingsStore);
+    var store = state.InboxStore;
     var poller = new RemoteNotificationHttpPoller(settings);
 
     var snapshot = store.Load();
@@ -170,13 +170,6 @@ static bool RunOnePollCycle(
     var persistedWaterline = ResolveWaterline(snapshot.MessagesOldestFirst);
     var performBackfill = startupBackfill && string.IsNullOrWhiteSpace(persistedWaterline);
     var waterline = performBackfill ? "" : persistedWaterline;
-    var seen = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
-    foreach (var message in snapshot.MessagesOldestFirst)
-    {
-        seen.TryAccept(RemoteNotificationsLegacyStore.StableId(message));
-        seen.TryAccept(RemoteNotificationsLegacyStore.FallbackId(message));
-    }
-
     var pull = poller.PullAsync(
         waterline,
         CancellationToken.None,
@@ -197,6 +190,13 @@ static bool RunOnePollCycle(
     {
         state.RecordPoll(pull.State, pull.Error, pull.Notifications.Count, accepted: 0, shown: 0);
         return pull.IsSuccess;
+    }
+
+    var seen = new RemoteNotificationSeenIdRing(snapshot.SeenMessageIds);
+    foreach (var message in snapshot.MessagesOldestFirst)
+    {
+        seen.TryAccept(RemoteNotificationsLegacyStore.StableId(message));
+        seen.TryAccept(RemoteNotificationsLegacyStore.FallbackId(message));
     }
 
     var accepted = new List<RemoteNotificationRecord>();
@@ -710,6 +710,16 @@ static string? GetOption(string[] args, string name)
 // ---------------------------------------------------------------------------
 sealed class WorkerState
 {
+    // Keep the inbox cache alive across polls; writes from other processes are
+    // detected by the store. Poll cycles are serialized by pollGate.
+    public RemoteNotificationSettingsStore SettingsStore { get; } = new();
+    public RemoteNotificationsLegacyStore InboxStore { get; }
+
+    public WorkerState()
+    {
+        InboxStore = new RemoteNotificationsLegacyStore(SettingsStore);
+    }
+
     private readonly object _gate = new();
     private string _connectionState = "starting";
     private string _lastPoll = "never";
