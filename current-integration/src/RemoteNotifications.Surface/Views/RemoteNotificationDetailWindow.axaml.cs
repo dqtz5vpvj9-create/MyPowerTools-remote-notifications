@@ -222,7 +222,9 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         var label = message.Label;
         var body = string.IsNullOrWhiteSpace(label) ? message.Message : message.DisplayMessage;
         var bodyHtml = Markdown.ToHtml(body, MarkdownPipeline);
-        _markdownWebView.NavigateToString(BuildHtmlDocument(label, bodyHtml));
+        // The default HTML base URI is HTTP on WKWebView. Our external-link
+        // handler cancels HTTP navigation, so use an explicitly internal document.
+        _markdownWebView.NavigateToString(BuildHtmlDocument(label, bodyHtml), new Uri("about:blank"));
     }
 
     private string BuildHtmlDocument(string label, string bodyHtml)
