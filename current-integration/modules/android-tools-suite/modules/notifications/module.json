@@ -26,7 +26,7 @@
     "preferred": "inproc",
     "allowInProc": true,
     "inProcRules": {
-      "maxCallMs": 3000,
+      "maxCallMs": 8000,
       "allowNativeDll": false,
       "allowWindow": false,
       "allowBackgroundThreads": false,
