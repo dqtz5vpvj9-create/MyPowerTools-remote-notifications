@@ -1,127 +1,58 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:av="using:Avalonia.Controls"
         xmlns:controls="using:MyPowerTools.UI.Controls"
         xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
         x:Class="RemoteNotifications.Surface.Views.RemoteNotificationDetailWindow"
         x:DataType="vm:RemoteNotificationMessageViewModel"
-        Width="920"
-        Height="720"
-        MinWidth="620"
-        MinHeight="460"
+        Width="920" Height="720" MinWidth="620" MinHeight="460"
         Background="{DynamicResource MptBrushAppBackground}"
-        KeyDown="OnWindowKeyDown"
-        WindowStartupLocation="CenterScreen">
-  <Grid RowDefinitions="Auto,*,Auto"
-        Margin="{DynamicResource MptCompactPadding}"
-        RowSpacing="10">
-    <StackPanel Grid.Row="0"
-                Orientation="Horizontal"
-                Spacing="{DynamicResource MptSpacingS}">
-      <Border Width="28"
-              Height="28"
-              CornerRadius="{DynamicResource MptRadiusBadge}"
-              Background="{Binding IconBackground}">
-        <TextBlock Text="{Binding IconGlyph}"
-                   Foreground="{Binding IconForeground}"
-                   FontSize="{DynamicResource MptFontSizeBody}"
-                   FontWeight="Bold"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center" />
+        KeyDown="OnWindowKeyDown" WindowStartupLocation="CenterScreen">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="{DynamicResource MptCompactPadding}" RowSpacing="10">
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="{DynamicResource MptSpacingS}">
+      <Border Width="28" Height="28" CornerRadius="{DynamicResource MptRadiusBadge}" Background="{Binding IconBackground}">
+        <TextBlock Text="{Binding IconGlyph}" Foreground="{Binding IconForeground}"
+                   FontSize="{DynamicResource MptFontSizeBody}" FontWeight="Bold"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
       </Border>
-      <TextBlock Text="{Binding RelativeTime}"
-                 Foreground="{DynamicResource MptBrushTextMuted}"
-                 FontSize="{DynamicResource MptFontSizeMeta}"
-                 ToolTip.Tip="{Binding AbsoluteTime}"
-                 VerticalAlignment="Center" />
-      <Border Background="{DynamicResource MptBrushSurfaceMuted}"
-              CornerRadius="{DynamicResource MptRadiusControl}"
-              Padding="{DynamicResource MptCompactBadgePadding}"
-              IsVisible="{Binding HasCustomChannel}"
-              VerticalAlignment="Center">
-        <TextBlock Text="{Binding Channel}"
-                   Foreground="{DynamicResource MptBrushAccent}"
-                   FontSize="{DynamicResource MptFontSizeMeta}"
-                   FontWeight="Bold" />
+      <TextBlock Text="{Binding RelativeTime}" Foreground="{DynamicResource MptBrushTextMuted}"
+                 FontSize="{DynamicResource MptFontSizeMeta}" ToolTip.Tip="{Binding AbsoluteTime}" VerticalAlignment="Center" />
+      <Border Background="{DynamicResource MptBrushSurfaceMuted}" CornerRadius="{DynamicResource MptRadiusControl}"
+              Padding="{DynamicResource MptCompactBadgePadding}" IsVisible="{Binding HasCustomChannel}" VerticalAlignment="Center">
+        <TextBlock Text="{Binding Channel}" Foreground="{DynamicResource MptBrushAccent}" FontSize="{DynamicResource MptFontSizeMeta}" FontWeight="Bold" />
       </Border>
-      <Border Background="{DynamicResource MptBrushSurfaceMuted}"
-              CornerRadius="{DynamicResource MptRadiusControl}"
-              Padding="{DynamicResource MptCompactBadgePadding}"
-              IsVisible="{Binding HasSession}"
-              ToolTip.Tip="{Binding SessionId}"
-              VerticalAlignment="Center">
-        <TextBlock Text="{Binding SessionDisplay}"
-                   Foreground="{DynamicResource MptBrushAccent}"
-                   FontSize="{DynamicResource MptFontSizeMeta}"
-                   FontWeight="Bold" />
+      <Border Background="{DynamicResource MptBrushSurfaceMuted}" CornerRadius="{DynamicResource MptRadiusControl}"
+              Padding="{DynamicResource MptCompactBadgePadding}" IsVisible="{Binding HasSession}"
+              ToolTip.Tip="{Binding SessionId}" VerticalAlignment="Center">
+        <TextBlock Text="{Binding SessionDisplay}" Foreground="{DynamicResource MptBrushAccent}" FontSize="{DynamicResource MptFontSizeMeta}" FontWeight="Bold" />
       </Border>
-      <Border Background="{DynamicResource MptBrushSurfaceMuted}"
-              CornerRadius="{DynamicResource MptRadiusControl}"
-              Padding="{DynamicResource MptCompactBadgePadding}"
-              IsVisible="{Binding HasSessionPosition}"
-              ToolTip.Tip="{Binding SessionPositionTooltip}"
-              VerticalAlignment="Center">
-        <TextBlock Text="{Binding SessionPositionText}"
-                   Foreground="{DynamicResource MptBrushAccent}"
-                   FontSize="{DynamicResource MptFontSizeMeta}"
-                   FontWeight="Bold" />
+      <Border Background="{DynamicResource MptBrushSurfaceMuted}" CornerRadius="{DynamicResource MptRadiusControl}"
+              Padding="{DynamicResource MptCompactBadgePadding}" IsVisible="{Binding HasSessionPosition}"
+              ToolTip.Tip="{Binding SessionPositionTooltip}" VerticalAlignment="Center">
+        <TextBlock Text="{Binding SessionPositionText}" Foreground="{DynamicResource MptBrushAccent}" FontSize="{DynamicResource MptFontSizeMeta}" FontWeight="Bold" />
       </Border>
     </StackPanel>
-
-    <Border Grid.Row="1"
-            Background="{DynamicResource MptBrushCardBackground}"
-            BorderBrush="{DynamicResource MptBrushBorder}"
-            BorderThickness="1"
-            CornerRadius="{DynamicResource MptRadiusControl}">
+    <Border Grid.Row="1" Background="{DynamicResource MptBrushCardBackground}" BorderBrush="{DynamicResource MptBrushBorder}"
+            BorderThickness="1" CornerRadius="{DynamicResource MptRadiusControl}">
       <Grid>
-        <av:NativeWebView x:Name="MarkdownWebView"
-                          Focusable="True"
-                          TabIndex="0"
-                          AutomationProperties.Name="Notification message markdown"
-                          ClipToBounds="True"
-                          HorizontalAlignment="Stretch"
-                          VerticalAlignment="Stretch"
-                          NavigationStarted="OnWebViewNavigationStarted"
-                          NewWindowRequested="OnWebViewNewWindowRequested"
-                          AdapterCreated="OnWebViewAdapterCreated"
-                          AdapterDestroyed="OnWebViewAdapterDestroyed" />
-        <ScrollViewer x:Name="FallbackViewer"
-                      IsVisible="False"
-                      HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto"
-                      Padding="{DynamicResource MptUniformS}">
+        <!-- No NativeWebView is created by XAML, including in the fallback path. -->
+        <ContentControl x:Name="DocumentHost" IsVisible="False"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                        AutomationProperties.Name="Notification message markdown" />
+        <ScrollViewer x:Name="FallbackViewer" HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto" Padding="{DynamicResource MptUniformS}">
           <StackPanel Spacing="{DynamicResource MptSpacingS}">
-            <TextBlock x:Name="FallbackStatus"
-                       Classes="MptMeta"
-                       TextWrapping="Wrap"
-                       IsVisible="False" />
-            <SelectableTextBlock Text="{Binding DisplayMessage}"
-                                 TextWrapping="Wrap" />
+            <TextBlock x:Name="FallbackStatus" Classes="MptMeta" TextWrapping="Wrap" IsVisible="False" />
+            <SelectableTextBlock Text="{Binding DisplayMessage}" TextWrapping="Wrap" />
           </StackPanel>
         </ScrollViewer>
       </Grid>
     </Border>
-
-    <StackPanel Grid.Row="2"
-                Orientation="Horizontal"
-                Spacing="{DynamicResource MptSpacingS}"
-                HorizontalAlignment="Right">
-      <controls:MptButton Content="← Prev"
-                          IsVisible="{Binding HasSessionPosition}"
-                          IsEnabled="{Binding CanNavigatePrevious}"
-                          Click="OnPreviousClick" />
-      <controls:MptButton Content="Next →"
-                          IsVisible="{Binding HasSessionPosition}"
-                          IsEnabled="{Binding CanNavigateNext}"
-                          Click="OnNextClick" />
-      <controls:MptButton Classes="MptPrimaryButton"
-                          Content="Copy message"
-                          Click="OnCopyClick" />
-      <controls:MptButton Content="Copy Session ID"
-                          IsVisible="{Binding HasSession}"
-                          Click="OnCopySessionClick" />
-      <controls:MptButton Content="Close"
-                          Click="OnCloseClick" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="{DynamicResource MptSpacingS}" HorizontalAlignment="Right">
+      <controls:MptButton Content="← Prev" IsVisible="{Binding HasSessionPosition}" IsEnabled="{Binding CanNavigatePrevious}" Click="OnPreviousClick" />
+      <controls:MptButton Content="Next →" IsVisible="{Binding HasSessionPosition}" IsEnabled="{Binding CanNavigateNext}" Click="OnNextClick" />
+      <controls:MptButton Classes="MptPrimaryButton" Content="Copy message" Click="OnCopyClick" />
+      <controls:MptButton Content="Copy Session ID" IsVisible="{Binding HasSession}" Click="OnCopySessionClick" />
+      <controls:MptButton Content="Close" Click="OnCloseClick" />
     </StackPanel>
   </Grid>
 </Window>

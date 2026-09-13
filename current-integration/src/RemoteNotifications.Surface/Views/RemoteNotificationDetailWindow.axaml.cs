@@ -1,13 +1,11 @@
 using System.Diagnostics;
-using System.IO;
-using System.Net;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Styling;
-using Markdig;
+using Avalonia.Threading;
 using MyPowerTools.AvaloniaSdk;
 using RemoteNotifications.Surface.Services;
 using RemoteNotifications.Surface.ViewModels;
@@ -16,144 +14,53 @@ namespace RemoteNotifications.Surface.Views;
 
 public sealed partial class RemoteNotificationDetailWindow : Window
 {
-    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .DisableHtml()
-        .Build();
-
-    private const string HtmlTemplate = """
-        <!doctype html>
-        <html data-theme="__THEME__">
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <style>
-            html[data-theme="light"] { --bg: #FFFFFF; --fg: #1F2328; --muted: #656D76; --border: #D0D7DE; --code-bg: #F6F8FA; --link: #0969DA; --selection: rgba(9, 105, 218, 0.25); }
-            html[data-theme="dark"] { --bg: #1E1E1E; --fg: #E6EDF3; --muted: #9198A1; --border: #3D444D; --code-bg: #2D333B; --link: #539BF5; --selection: rgba(83, 155, 245, 0.30); }
-            html, body { background: var(--bg); color: var(--fg); }
-            body { margin: 0; padding: 16px; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 14px; line-height: 1.55; overflow-wrap: break-word; }
-            .label { margin-bottom: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-            h1, h2, h3, h4 { line-height: 1.3; margin: 1em 0 0.5em; }
-            h1 { font-size: 20px; }
-            h2 { font-size: 17px; }
-            h3 { font-size: 15px; }
-            p { margin: 0.5em 0; }
-            ul, ol { margin: 0.5em 0; padding-left: 1.5em; }
-            li { margin: 0.2em 0; }
-            pre { margin: 0.5em 0; padding: 10px; overflow: auto; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }
-            code { padding: 0.1em 0.35em; border-radius: 4px; background: var(--code-bg); font-family: "Cascadia Code", Consolas, monospace; font-size: 0.9em; }
-            pre code { padding: 0; background: transparent; }
-            blockquote { margin: 0.5em 0; padding-left: 1em; border-left: 3px solid var(--border); color: var(--muted); }
-            table { width: 100%; margin: 0.5em 0; border-collapse: collapse; }
-            th, td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
-            th { background: var(--code-bg); }
-            a { color: var(--link); }
-            hr { margin: 1em 0; border: none; border-top: 1px solid var(--border); }
-            .task-list-item { list-style: none; }
-            .task-list-item input { margin-right: 0.4em; }
-            img { max-width: 100%; }
-            ::selection { background: var(--selection); }
-          </style>
-        </head>
-        <body>
-        {{CONTENT}}
-        <script>
-          function post(message) {
-            if (window.chrome && window.chrome.webview) {
-              window.chrome.webview.postMessage(message);
-            }
-            if (window.webkit && window.webkit.messageHandlers &&
-                window.webkit.messageHandlers.close) {
-              window.webkit.messageHandlers.close.postMessage(message);
-            }
-          }
-          function openClickedLink(event) {
-            if (!event.isTrusted || (event.button !== 0 && event.button !== 1)) { return; }
-            var anchor = event.target.closest && event.target.closest("a[href]");
-            if (!anchor || anchor.getAttribute("href").startsWith("#")) { return; }
-            var uri = new URL(anchor.href, document.baseURI);
-            if (uri.protocol !== "http:" && uri.protocol !== "https:") { return; }
-            event.preventDefault();
-            post("open-external:" + uri.href);
-          }
-          document.addEventListener("click", openClickedLink);
-          document.addEventListener("auxclick", openClickedLink);
-          function isEditable(node) {
-            while (node) {
-              if (node.isContentEditable) { return true; }
-              var tag = node.tagName;
-              if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") { return true; }
-              node = node.parentElement;
-            }
-            return false;
-          }
-          document.addEventListener("keydown", function (event) {
-            if (event.key === "Escape") {
-              post("close");
-              return;
-            }
-            if (isEditable(event.target)) { return; }
-            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) { return; }
-            if (event.key === "ArrowLeft") {
-              event.preventDefault();
-              post("previous");
-            } else if (event.key === "ArrowRight") {
-              event.preventDefault();
-              post("next");
-            }
-          });
-        </script>
-        </body>
-        </html>
-        """;
-
-    private readonly NativeWebView _markdownWebView;
+    private readonly string _diagnosticId = Guid.NewGuid().ToString("N");
+    private readonly ContentControl _documentHost;
     private readonly ScrollViewer _fallbackViewer;
     private readonly TextBlock _fallbackStatus;
-    private IRemoteNotificationsStore _sessionStore = new RemoteNotificationsLegacyStore();
+    private IRemoteNotificationsStore? _sessionStore;
+    private readonly IMptWebSurfaceService? _webSurfaces;
     private RemoteNotificationSessionPosition? _sessionPosition;
-    private bool _webViewReady;
-    private bool _themeChangedBeforeReady;
+    private IMptWebSurfaceSession? _document;
+    private bool _opened;
+    private bool _closed;
+    private long _generation;
 
     public RemoteNotificationDetailWindow()
     {
+        TraceDetail("construct.begin");
         AvaloniaXamlLoader.Load(this);
-        Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://MyPowerTools.Shell.Avalonia/Assets/MyPowerTools.ico")));
-        _markdownWebView = this.FindControl<NativeWebView>("MarkdownWebView")
-            ?? throw new InvalidOperationException("Markdown web view was not found.");
+        _documentHost = this.FindControl<ContentControl>("DocumentHost")
+            ?? throw new InvalidOperationException("Document host was not found.");
         _fallbackViewer = this.FindControl<ScrollViewer>("FallbackViewer")
             ?? throw new InvalidOperationException("Markdown fallback viewer was not found.");
         _fallbackStatus = this.FindControl<TextBlock>("FallbackStatus")
             ?? throw new InvalidOperationException("Markdown fallback status was not found.");
-        _markdownWebView.WebMessageReceived += OnWebMessageReceived;
+        try
+        {
+            using var icon = AssetLoader.Open(new Uri("avares://MyPowerTools.Shell.Avalonia/Assets/MyPowerTools.ico"));
+            Icon = new WindowIcon(icon);
+        }
+        catch (Exception ex) { Trace.WriteLine($"Notification window icon: {ex}"); }
+        Opened += OnOpened;
+        Closed += OnClosed;
+        ActualThemeVariantChanged += OnActualThemeVariantChanged;
+        TraceDetail("construct.ready");
     }
 
     public RemoteNotificationDetailWindow(
         RemoteNotificationMessageViewModel message,
-        IRemoteNotificationsStore? sessionStore = null)
-        : this()
+        IRemoteNotificationsStore? sessionStore = null,
+        IMptWebSurfaceService? webSurfaces = null) : this()
     {
         _sessionStore = sessionStore ?? new RemoteNotificationsLegacyStore();
-        ActualThemeVariantChanged += OnActualThemeVariantChanged;
-        Closed += OnClosed;
+        _webSurfaces = webSurfaces;
         SetMessage(message);
-        if (IsWebViewAvailable())
-        {
-            RenderMarkdown();
-            return;
-        }
-
-        ShowFallback("The web-based markdown viewer is unavailable on this system. Showing plain text instead.");
     }
 
-    /// <summary>
-    /// Store used to resolve the current message's session chain. The detail
-    /// window service injects its own store so navigation sees the same
-    /// history as the feed.
-    /// </summary>
     public IRemoteNotificationsStore SessionStore
     {
-        get => _sessionStore;
+        get => _sessionStore ??= new RemoteNotificationsLegacyStore();
         set
         {
             _sessionStore = value ?? throw new ArgumentNullException(nameof(value));
@@ -161,174 +68,187 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         }
     }
 
-    public void NavigatePrevious()
-    {
-        Navigate(-1);
-    }
-
-    public void NavigateNext()
-    {
-        Navigate(1);
-    }
+    public void NavigatePrevious() => Navigate(-1);
+    public void NavigateNext() => Navigate(1);
 
     private void Navigate(int delta)
     {
-        if (_sessionPosition is not { } position ||
-            !RemoteNotificationSessionChain.TryNavigate(position, delta, out var target))
-        {
-            return;
-        }
-
+        if (_closed || _sessionPosition is not { } position ||
+            !RemoteNotificationSessionChain.TryNavigate(position, delta, out var target)) return;
+        TraceDetail(delta < 0 ? "navigate.previous" : "navigate.next");
         SetMessage(new RemoteNotificationMessageViewModel(target));
     }
 
-    private void SetMessage(RemoteNotificationMessageViewModel message)
+    internal void SetMessage(RemoteNotificationMessageViewModel message)
     {
+        ArgumentNullException.ThrowIfNull(message);
+        if (_closed) return;
         DataContext = message;
         Title = message.DetailWindowTitle;
+        TraceDetail("message.selected");
         RefreshSessionPosition();
-        if (_webViewReady)
-        {
-            RenderMarkdown();
-        }
+        if (_opened) RenderMarkdown();
     }
 
     private void RefreshSessionPosition()
     {
-        var position = ResolveSessionPosition();
-        _sessionPosition = position;
-        if (DataContext is RemoteNotificationMessageViewModel message)
+        _sessionPosition = null;
+        if (DataContext is not RemoteNotificationMessageViewModel message) return;
+        if (message.HasSession)
         {
-            message.UpdateSessionPosition(position);
+            try
+            {
+                TraceDetail("history.load");
+                _sessionPosition = RemoteNotificationSessionChain.Resolve(
+                    SessionStore.Load().MessagesOldestFirst, message.Source);
+            }
+            catch (Exception ex)
+            {
+                // Session lookup is optional; the selected message remains readable.
+                Trace.WriteLine($"Notification session lookup: {ex}");
+            }
         }
+        message.UpdateSessionPosition(_sessionPosition);
     }
 
-    private RemoteNotificationSessionPosition? ResolveSessionPosition()
+    private void OnOpened(object? sender, EventArgs e)
     {
-        if (DataContext is not RemoteNotificationMessageViewModel message || !message.HasSession)
-        {
-            return null;
-        }
-
-        try
-        {
-            return RemoteNotificationSessionChain.Resolve(
-                SessionStore.Load().MessagesOldestFirst,
-                message.Source);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
-        {
-            // Session position is a convenience; a failing store must not break the window.
-            return null;
-        }
+        _opened = true;
+        TraceDetail("window.opened");
+        RenderMarkdown();
     }
 
     private void RenderMarkdown()
     {
-        if (DataContext is not RemoteNotificationMessageViewModel message)
+        if (!_opened || _closed || DataContext is not RemoteNotificationMessageViewModel message) return;
+        TraceDetail("render.begin");
+        ReleaseDocument();
+        var generation = _generation;
+        try
         {
-            return;
-        }
-
-        var label = message.Label;
-        var body = string.IsNullOrWhiteSpace(label) ? message.Message : message.DisplayMessage;
-        var bodyHtml = Markdown.ToHtml(body, MarkdownPipeline);
-        // The default HTML base URI is HTTP on WKWebView. Our external-link
-        // handler cancels HTTP navigation, so use an explicitly internal document.
-        _markdownWebView.NavigateToString(BuildHtmlDocument(label, bodyHtml), new Uri("about:blank"));
-    }
-
-    private string BuildHtmlDocument(string label, string bodyHtml)
-    {
-        var content = string.IsNullOrWhiteSpace(label)
-            ? bodyHtml
-            : $"<div class=\"label\">{WebUtility.HtmlEncode(label)}</div>{bodyHtml}";
-        var theme = ActualThemeVariant == ThemeVariant.Dark ? "dark" : "light";
-        return HtmlTemplate
-            .Replace("__THEME__", theme, StringComparison.Ordinal)
-            .Replace("{{CONTENT}}", content, StringComparison.Ordinal);
-    }
-
-    private static bool IsWebViewAvailable()
-    {
-        WebViewAdapterType[] candidates = OperatingSystem.IsWindows()
-            ? [WebViewAdapterType.WebView2, WebViewAdapterType.WebView1]
-            : OperatingSystem.IsMacOS()
-                ? [WebViewAdapterType.WkWebView]
-                : OperatingSystem.IsLinux()
-                    ? [WebViewAdapterType.WpeWebKit, WebViewAdapterType.WebKitGtk]
-                    : Array.Empty<WebViewAdapterType>();
-
-        foreach (var candidate in candidates)
-        {
-            try
+            var label = message.Label;
+            var body = string.IsNullOrWhiteSpace(label) ? message.Message : message.DisplayMessage;
+            var html = RemoteNotificationHtmlDocument.Build(label, body, ActualThemeVariant == ThemeVariant.Dark);
+            // Always enqueue commands: Close/navigation must not dispose the native view
+            // on the stack of a WebKit callback. Ignore commands from replaced documents.
+            void OnMessage(string value) => Dispatcher.UIThread.Post(() =>
             {
-                var info = WebViewAdapterInfo.GetAdapterInfo(candidate);
-                if (info.IsSupported && info.IsInstalled)
-                {
-                    return true;
-                }
-            }
-            catch (Exception)
+                if (!_closed && generation == _generation) HandleDocumentMessage(value);
+            });
+            TraceDetail("renderer.create");
+            _document = OperatingSystem.IsMacOS() || _webSurfaces is not null
+                ? new RemoteNotificationHostedDocument(
+                    _webSurfaces ?? throw new PlatformNotSupportedException("The Shell does not provide a macOS web-surface service."),
+                    html, OnMessage)
+                : new RemoteNotificationNativeDocument(html, OnMessage);
+            _document.StateChanged += OnDocumentStateChanged;
+            _fallbackStatus.Text = "Loading formatted message…";
+            _fallbackStatus.IsVisible = true;
+            _fallbackViewer.IsVisible = true;
+            _documentHost.IsVisible = true;
+            TraceDetail("renderer.attach");
+            _documentHost.Content = _document.View;
+            TraceDetail("renderer.attached");
+            ApplyDocumentState(_document.State, "");
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Notification Markdown viewer: {ex}");
+            ShowFallback("The formatted viewer could not be loaded. The full message is available below.");
+        }
+    }
+
+    private void OnDocumentStateChanged(object? sender, MptWebSurfaceStateChangedEventArgs e)
+    {
+        // A failing provider can report synchronously while Avalonia is attaching its
+        // native child. Defer removal until that attachment has finished.
+        var generation = _generation;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_closed && generation == _generation && ReferenceEquals(sender, _document))
+                ApplyDocumentState(e.State, e.Message);
+        });
+    }
+
+    private void ApplyDocumentState(MptWebSurfaceState state, string message)
+    {
+        TraceDetail("renderer.state." + state);
+        if (state == MptWebSurfaceState.Ready)
+        {
+            _fallbackViewer.IsVisible = false;
+            _fallbackStatus.IsVisible = false;
+        }
+        else if (state is MptWebSurfaceState.Failed or MptWebSurfaceState.Unavailable)
+        {
+            Trace.WriteLine($"Notification document {state}: {message}");
+            ShowFallback("The formatted viewer is unavailable. The full message is available below.");
+        }
+    }
+
+    private void ShowFallback(string status)
+    {
+        TraceDetail("renderer.fallback");
+        ReleaseDocument();
+        _fallbackViewer.IsVisible = true;
+        _fallbackStatus.IsVisible = !string.IsNullOrWhiteSpace(status);
+        var logPath = Environment.GetEnvironmentVariable("MPT_SHELL_DIAGNOSTIC_LOG");
+        _fallbackStatus.Text = string.IsNullOrWhiteSpace(logPath)
+            ? status
+            : status + Environment.NewLine + "Diagnostic log: " + logPath;
+    }
+
+    private void ReleaseDocument()
+    {
+        ++_generation;
+        var document = _document;
+        _document = null;
+        if (document is not null)
+        {
+            TraceDetail("renderer.release");
+            document.StateChanged -= OnDocumentStateChanged;
+        }
+        try
+        {
+            _documentHost.Content = null;
+            _documentHost.IsVisible = false;
+        }
+        finally
+        {
+            try { document?.Dispose(); }
+            catch (Exception ex) { Trace.WriteLine($"Notification viewer cleanup: {ex}"); }
+        }
+    }
+
+    private void HandleDocumentMessage(string value)
+    {
+        MptCommandFaultBoundary.Run(this, "Notification detail action", () =>
+        {
+            var message = value.Trim();
+            const string prefix = "open-external:";
+            if (message.StartsWith(prefix, StringComparison.Ordinal))
             {
-                // A failed probe only means this adapter is not usable; keep checking.
+                if (Uri.TryCreate(message[prefix.Length..], UriKind.Absolute, out var uri) &&
+                    uri.Scheme is "http" or "https")
+                    Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                return;
             }
-        }
-
-        return false;
-    }
-
-    private void OnWebViewAdapterCreated(object? sender, WebViewAdapterEventArgs e)
-    {
-        _webViewReady = true;
-        ShowWebView();
-        if (_themeChangedBeforeReady)
-        {
-            _themeChangedBeforeReady = false;
-            RenderMarkdown();
-        }
-    }
-
-    private void OnWebViewAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
-    {
-        _webViewReady = false;
-        ShowFallback("The web-based markdown viewer was disconnected. Showing plain text instead.");
-    }
-
-    private void OnWebMessageReceived(object? sender, WebMessageReceivedEventArgs e)
-    {
-        var message = e.Body?.Trim();
-        const string openPrefix = "open-external:";
-        if (message?.StartsWith(openPrefix, StringComparison.Ordinal) == true)
-        {
-            if (Uri.TryCreate(message[openPrefix.Length..], UriKind.Absolute, out var uri) &&
-                uri.Scheme is "http" or "https")
+            switch (message)
             {
-                OpenExternal(uri);
+                case "close": Close(); break;
+                case "previous": NavigatePrevious(); break;
+                case "next": NavigateNext(); break;
             }
-            return;
-        }
-
-        switch (message?.ToLowerInvariant())
-        {
-            case "close":
-                Close();
-                break;
-            case "previous":
-                NavigatePrevious();
-                break;
-            case "next":
-                NavigateNext();
-                break;
-        }
+        });
     }
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Handled || e.Source is TextBox) return;
         switch (e.Key)
         {
             case Key.Escape:
                 Close();
+                e.Handled = true;
                 break;
             case Key.Left when e.KeyModifiers == KeyModifiers.None && _sessionPosition is not null:
                 NavigatePrevious();
@@ -341,125 +261,45 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         }
     }
 
-    private void ShowWebView()
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e)
     {
-        _markdownWebView.IsVisible = true;
-        _fallbackViewer.IsVisible = false;
-        _fallbackStatus.IsVisible = false;
+        if (_opened && !_closed) RenderMarkdown();
     }
 
-    private void ShowFallback(string status)
+    private void OnClosed(object? sender, EventArgs e)
     {
-        _markdownWebView.IsVisible = false;
-        _fallbackViewer.IsVisible = true;
-        _fallbackStatus.IsVisible = !string.IsNullOrWhiteSpace(status);
-        _fallbackStatus.Text = status;
-    }
-
-    private void OnActualThemeVariantChanged(object? sender, EventArgs eventArgs)
-    {
-        if (_webViewReady)
-        {
-            RenderMarkdown();
-            return;
-        }
-
-        _themeChangedBeforeReady = true;
-    }
-
-    private void OnClosed(object? sender, EventArgs eventArgs)
-    {
-        ActualThemeVariantChanged -= OnActualThemeVariantChanged;
+        _closed = true;
+        TraceDetail("window.closed");
+        Opened -= OnOpened;
         Closed -= OnClosed;
+        ActualThemeVariantChanged -= OnActualThemeVariantChanged;
+        ReleaseDocument();
     }
 
-    private void OnWebViewNavigationStarted(object? sender, WebViewNavigationStartingEventArgs e)
-    {
-        if (e.Request is not { Scheme: "http" or "https" })
-        {
-            return;
-        }
+    private void TraceDetail(string phase) => RemoteNotificationDiagnostics.Write(
+        phase, DataContext as RemoteNotificationMessageViewModel, _diagnosticId, _generation, _webSurfaces?.GetType().FullName);
 
-        // NativeWebView also reports internal HTML loads (its default base is
-        // http://localhost:12345/). Navigation alone is not a user link click.
-        e.Cancel = true;
-    }
-
-    private void OnWebViewNewWindowRequested(object? sender, WebViewNewWindowRequestedEventArgs e)
-    {
-        // Trusted link clicks are handled by the document bridge, including
-        // target=_blank. Never turn an automatic popup into a browser launch.
-        e.Handled = true;
-    }
-
-    private static void OpenExternal(Uri uri)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = uri.AbsoluteUri,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception)
-        {
-            // Opening the system browser must never break the detail window.
-        }
-    }
-
-    private void OnPreviousClick(object? sender, RoutedEventArgs e)
-    {
-        NavigatePrevious();
-    }
-
-    private void OnNextClick(object? sender, RoutedEventArgs e)
-    {
-        NavigateNext();
-    }
+    private void OnPreviousClick(object? sender, RoutedEventArgs e) => NavigatePrevious();
+    private void OnNextClick(object? sender, RoutedEventArgs e) => NavigateNext();
+    private void OnCloseClick(object? sender, RoutedEventArgs e) => Close();
 
     private void OnCopyClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not RemoteNotificationMessageViewModel message || Clipboard is null)
-        {
-            return;
-        }
-
-        MptCommandFaultBoundary.Run(
-            this,
-            "Copy remote notification details",
-            async () =>
-            {
-                var transfer = new DataTransfer();
-                transfer.Add(DataTransferItem.CreateText(message.Message));
-                await Clipboard.SetDataAsync(transfer);
-                await Clipboard.FlushAsync();
-            });
+        if (DataContext is RemoteNotificationMessageViewModel message) CopyText(message.Message);
     }
-
     private void OnCopySessionClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not RemoteNotificationMessageViewModel message ||
-            !message.HasSession ||
-            Clipboard is null)
-        {
-            return;
-        }
-
-        MptCommandFaultBoundary.Run(
-            this,
-            "Copy remote notification Session ID",
-            async () =>
-            {
-                var transfer = new DataTransfer();
-                transfer.Add(DataTransferItem.CreateText(message.SessionId));
-                await Clipboard.SetDataAsync(transfer);
-                await Clipboard.FlushAsync();
-            });
+        if (DataContext is RemoteNotificationMessageViewModel { HasSession: true } message) CopyText(message.SessionId);
     }
-
-    private void OnCloseClick(object? sender, RoutedEventArgs e)
+    private void CopyText(string text)
     {
-        Close();
+        if (Clipboard is not { } clipboard) return;
+        MptCommandFaultBoundary.Run(this, "Copy remote notification details", async () =>
+        {
+            var transfer = new DataTransfer();
+            transfer.Add(DataTransferItem.CreateText(text));
+            await clipboard.SetDataAsync(transfer);
+            await clipboard.FlushAsync();
+        });
     }
 }
