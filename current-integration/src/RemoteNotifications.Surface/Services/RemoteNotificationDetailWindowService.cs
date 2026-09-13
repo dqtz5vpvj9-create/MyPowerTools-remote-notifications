@@ -43,6 +43,7 @@ public sealed class RemoteNotificationDetailWindowService : IDisposable
         Dispatcher.UIThread.VerifyAccess();
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(message);
+        RemoteNotificationDiagnostics.Write("open.request", message, provider: _webSurfaces?.GetType().FullName);
         var key = string.IsNullOrWhiteSpace(message.Id) ? message.FallbackId : message.Id;
         if (_windows.TryGetValue(key, out var existing))
         {

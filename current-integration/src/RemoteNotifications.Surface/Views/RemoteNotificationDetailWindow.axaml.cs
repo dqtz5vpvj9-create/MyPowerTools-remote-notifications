@@ -14,6 +14,7 @@ namespace RemoteNotifications.Surface.Views;
 
 public sealed partial class RemoteNotificationDetailWindow : Window
 {
+    private readonly string _diagnosticId = Guid.NewGuid().ToString("N");
     private readonly ContentControl _documentHost;
     private readonly ScrollViewer _fallbackViewer;
     private readonly TextBlock _fallbackStatus;
@@ -27,6 +28,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
 
     public RemoteNotificationDetailWindow()
     {
+        TraceDetail("construct.begin");
         AvaloniaXamlLoader.Load(this);
         _documentHost = this.FindControl<ContentControl>("DocumentHost")
             ?? throw new InvalidOperationException("Document host was not found.");
@@ -43,6 +45,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         Opened += OnOpened;
         Closed += OnClosed;
         ActualThemeVariantChanged += OnActualThemeVariantChanged;
+        TraceDetail("construct.ready");
     }
 
     public RemoteNotificationDetailWindow(
@@ -72,6 +75,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
     {
         if (_closed || _sessionPosition is not { } position ||
             !RemoteNotificationSessionChain.TryNavigate(position, delta, out var target)) return;
+        TraceDetail(delta < 0 ? "navigate.previous" : "navigate.next");
         SetMessage(new RemoteNotificationMessageViewModel(target));
     }
 
@@ -81,6 +85,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         if (_closed) return;
         DataContext = message;
         Title = message.DetailWindowTitle;
+        TraceDetail("message.selected");
         RefreshSessionPosition();
         if (_opened) RenderMarkdown();
     }
@@ -93,6 +98,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         {
             try
             {
+                TraceDetail("history.load");
                 _sessionPosition = RemoteNotificationSessionChain.Resolve(
                     SessionStore.Load().MessagesOldestFirst, message.Source);
             }
@@ -108,12 +114,14 @@ public sealed partial class RemoteNotificationDetailWindow : Window
     private void OnOpened(object? sender, EventArgs e)
     {
         _opened = true;
+        TraceDetail("window.opened");
         RenderMarkdown();
     }
 
     private void RenderMarkdown()
     {
         if (!_opened || _closed || DataContext is not RemoteNotificationMessageViewModel message) return;
+        TraceDetail("render.begin");
         ReleaseDocument();
         var generation = _generation;
         try
@@ -127,6 +135,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             {
                 if (!_closed && generation == _generation) HandleDocumentMessage(value);
             });
+            TraceDetail("renderer.create");
             _document = OperatingSystem.IsMacOS() || _webSurfaces is not null
                 ? new RemoteNotificationHostedDocument(
                     _webSurfaces ?? throw new PlatformNotSupportedException("The Shell does not provide a macOS web-surface service."),
@@ -137,7 +146,9 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             _fallbackStatus.IsVisible = true;
             _fallbackViewer.IsVisible = true;
             _documentHost.IsVisible = true;
+            TraceDetail("renderer.attach");
             _documentHost.Content = _document.View;
+            TraceDetail("renderer.attached");
             ApplyDocumentState(_document.State, "");
         }
         catch (Exception ex)
@@ -161,6 +172,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
 
     private void ApplyDocumentState(MptWebSurfaceState state, string message)
     {
+        TraceDetail("renderer.state." + state);
         if (state == MptWebSurfaceState.Ready)
         {
             _fallbackViewer.IsVisible = false;
@@ -175,10 +187,14 @@ public sealed partial class RemoteNotificationDetailWindow : Window
 
     private void ShowFallback(string status)
     {
+        TraceDetail("renderer.fallback");
         ReleaseDocument();
         _fallbackViewer.IsVisible = true;
         _fallbackStatus.IsVisible = !string.IsNullOrWhiteSpace(status);
-        _fallbackStatus.Text = status;
+        var logPath = Environment.GetEnvironmentVariable("MPT_SHELL_DIAGNOSTIC_LOG");
+        _fallbackStatus.Text = string.IsNullOrWhiteSpace(logPath)
+            ? status
+            : status + Environment.NewLine + "Diagnostic log: " + logPath;
     }
 
     private void ReleaseDocument()
@@ -186,7 +202,11 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         ++_generation;
         var document = _document;
         _document = null;
-        if (document is not null) document.StateChanged -= OnDocumentStateChanged;
+        if (document is not null)
+        {
+            TraceDetail("renderer.release");
+            document.StateChanged -= OnDocumentStateChanged;
+        }
         try
         {
             _documentHost.Content = null;
@@ -249,11 +269,15 @@ public sealed partial class RemoteNotificationDetailWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _closed = true;
+        TraceDetail("window.closed");
         Opened -= OnOpened;
         Closed -= OnClosed;
         ActualThemeVariantChanged -= OnActualThemeVariantChanged;
         ReleaseDocument();
     }
+
+    private void TraceDetail(string phase) => RemoteNotificationDiagnostics.Write(
+        phase, DataContext as RemoteNotificationMessageViewModel, _diagnosticId, _generation, _webSurfaces?.GetType().FullName);
 
     private void OnPreviousClick(object? sender, RoutedEventArgs e) => NavigatePrevious();
     private void OnNextClick(object? sender, RoutedEventArgs e) => NavigateNext();
