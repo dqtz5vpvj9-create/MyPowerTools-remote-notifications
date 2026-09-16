@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Send a notification to the notification server. Used by agent hooks."""
 import argparse
+import glob
 import hashlib
 import json
 import re
@@ -223,6 +224,135 @@ def _dsh_home() -> str:
     return os.environ.get("DSH_HOME") or os.path.expanduser("~/.dsh")
 
 
+def _dsh_session_id_variants(session_id: str) -> list:
+    """Return the file/directory names a DSH session id can appear under.
+
+    DSH writes both ``<uuid>`` and ``session-<uuid>`` depending on the version
+    that created the session, so every lookup tries both spellings.
+    """
+    if not session_id:
+        return []
+    prefix = "session-"
+    if session_id.startswith(prefix):
+        return [session_id, session_id[len(prefix):]]
+    return [session_id, f"{prefix}{session_id}"]
+
+
+def _dsh_projection_title(session_id: str) -> str:
+    """Read the title from DSH's per-session projection cache.
+
+    Current DSH versions keep one ``session_projcache/sessions/<id>.json`` file
+    per session, each wrapped in a ``{"version": n, "record": {...}}`` envelope.
+    Older versions used a single ``session_projcache.json`` table instead.
+    """
+    cache_dir = os.path.join(_dsh_home(), "storages", "session_projcache", "sessions")
+    for candidate in _dsh_session_id_variants(session_id):
+        try:
+            with open(os.path.join(cache_dir, f"{candidate}.json"), encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        record = payload.get("record")
+        if not isinstance(record, dict):
+            record = payload
+        row = (record.get("rows") or {}).get("title") or {}
+        title = row.get("val") if isinstance(row, dict) else row
+        if title:
+            return str(title)
+    return ""
+
+
+def _dsh_legacy_projection_title(session_id: str) -> str:
+    """Read the title from the pre-v3 single-file projection cache."""
+    cache_path = os.path.join(_dsh_home(), "storages", "session_projcache.json")
+    try:
+        with open(cache_path, encoding="utf-8") as fh:
+            cache = json.load(fh)
+        row = (cache.get("tables", {}).get("sessions", {}).get(session_id) or {}).get("rows") or {}
+        title = (row.get("title") or {}).get("val")
+        if title:
+            return str(title)
+    except Exception:
+        pass
+    return ""
+
+
+def _dsh_session_log_path(session_id: str) -> str:
+    """Locate the session log when the hook reports no ``transcript_path``.
+
+    The hooks-codex bridge always sends ``transcript_path: null`` because the
+    persistence seam exposes no artifact paths, so the sender finds the log
+    itself: ``<DSH_HOME>/sessions/<workspace>/<session_id>/session*.jsonl*``.
+    """
+    if not session_id:
+        return ""
+    sessions_root = os.path.join(_dsh_home(), "sessions")
+    best = ""
+    best_mtime = -1.0
+    for candidate in _dsh_session_id_variants(session_id):
+        for directory in glob.glob(os.path.join(sessions_root, "*", candidate)):
+            logs = glob.glob(os.path.join(directory, "session*.jsonl*"))
+            if not logs:
+                continue
+            preferred = [p for p in logs if ".v3." in os.path.basename(p)] or logs
+            path = max(preferred, key=os.path.getmtime)
+            mtime = os.path.getmtime(path)
+            if mtime > best_mtime:
+                best, best_mtime = path, mtime
+    return best
+
+
+def _dsh_session_header(session_id: str) -> dict:
+    """Read the first ``session`` event from a DSH session log."""
+    path = _dsh_session_log_path(session_id)
+    if not path:
+        return {}
+    try:
+        if path.endswith(".zstd"):
+            import zstandard
+            with open(path, "rb") as fh:
+                with zstandard.ZstdDecompressor().stream_reader(fh) as reader:
+                    chunk = reader.read(1 << 20)
+        else:
+            with open(path, "rb") as fh:
+                chunk = fh.read(1 << 20)
+    except Exception:
+        return {}
+    try:
+        event = json.loads(chunk.split(b"\n", 1)[0].decode("utf-8", errors="replace"))
+    except Exception:
+        return {}
+    return event if isinstance(event, dict) and event.get("type") == "session" else {}
+
+
+def is_dsh_internal_thread(data: dict) -> bool:
+    """Return true when the DSH session is an internal subagent session.
+
+    DSH runs each subagent as a standalone session whose Stop hook fires on the
+    same bridge as the parent's, so a parallel fan-out would otherwise notify
+    once per child. The parent session owns the user-visible completion, so
+    child completions stay out of the notification stream. Missing or
+    unreadable session metadata fails open, keeping ordinary notifications
+    deliverable.
+    """
+    session_id = str(data.get("session_id") or "")
+    if not session_id:
+        return False
+    header = _dsh_session_header(session_id)
+    if not header:
+        return False
+    if str(header.get("origin") or "").strip().lower() == "subagent":
+        return True
+    if header.get("parentSession"):
+        return True
+    try:
+        return int(header.get("delegationDepth") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _read_transcript_lines(transcript_path: str) -> list:
     if not transcript_path:
         return []
@@ -250,18 +380,11 @@ def _dsh_session_name(session_id: str, transcript_path: str = "") -> str:
     """Resolve a DSH session title from the projection cache, then transcript."""
     if not session_id:
         return ""
-    cache_path = os.path.join(_dsh_home(), "storages", "session_projcache.json")
-    try:
-        with open(cache_path, encoding="utf-8") as fh:
-            cache = json.load(fh)
-        row = (cache.get("tables", {}).get("sessions", {}).get(session_id) or {}).get("rows") or {}
-        title = (row.get("title") or {}).get("val")
-        if title:
-            return str(title)
-    except Exception:
-        pass
+    title = _dsh_projection_title(session_id) or _dsh_legacy_projection_title(session_id)
+    if title:
+        return title
     title = ""
-    for event in _read_transcript_lines(transcript_path):
+    for event in _read_transcript_lines(transcript_path or _dsh_session_log_path(session_id)):
         if event.get("type") == "session/title":
             candidate = (event.get("data") or {}).get("title")
             if candidate:
@@ -269,10 +392,10 @@ def _dsh_session_name(session_id: str, transcript_path: str = "") -> str:
     return title
 
 
-def _dsh_last_assistant_message(transcript_path: str) -> str:
-    """Return the last assistant text message from a DSH transcript."""
+def _dsh_assistant_text(lines: list) -> str:
+    """Return the last assistant text message from parsed DSH transcript lines."""
     last = ""
-    for event in _read_transcript_lines(transcript_path):
+    for event in lines:
         if event.get("type") != "assistant/message":
             continue
         message = (event.get("data") or {}).get("message") or {}
@@ -708,10 +831,10 @@ def _explicit_agent_internal_kind(content_kind: object) -> bool:
     return str(content_kind or "").strip().lower() in _EXPLICIT_AGENT_INTERNAL_KINDS
 
 
-def _dsh_last_user_message(transcript_path: str) -> str:
-    """Last user prompt from a DSH transcript."""
+def _dsh_user_text(lines: list) -> str:
+    """Last user prompt from parsed DSH transcript lines."""
     last = ""
-    for event in _read_transcript_lines(transcript_path):
+    for event in lines:
         if event.get("type") != "user/message":
             continue
         data = event.get("data") or {}
@@ -748,6 +871,17 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
     """
     label = label_for_payload(data, client)
     claude_task = label == CLAUDE_TASK_LABEL
+    dsh_lines: list = []
+    if client == "dsh":
+        # hooks-codex always reports transcript_path as null, so fall back to
+        # the session log DSH wrote for this session id. The log is parsed once
+        # for both the reply and the triggering request: long sessions can be
+        # tens of megabytes compressed.
+        dsh_transcript = data.get("transcript_path") or _dsh_session_log_path(
+            str(data.get("session_id") or "")
+        )
+        if dsh_transcript:
+            dsh_lines = _read_transcript_lines(dsh_transcript)
 
     last_msg = ""
     if client == "claude":
@@ -769,13 +903,13 @@ def format_stop_message(data: dict, client: str = "claude") -> str:
             last_msg = ""
         last_msg = last_msg.strip()
     if not last_msg and client == "dsh":
-        last_msg = _dsh_last_assistant_message(data.get("transcript_path", ""))
+        last_msg = _dsh_assistant_text(dsh_lines)
     if not last_msg and client in ("cursor", "claude"):
         last_msg = _last_role_text(_cursor_transcript_lines(data), {"assistant", "assistant/message"})
     request = data.get("user_prompt") or data.get("prompt") or ""
     if not request:
         if client == "dsh":
-            request = _dsh_last_user_message(data.get("transcript_path", ""))
+            request = _dsh_user_text(dsh_lines)
         elif client == "codex":
             request = _codex_last_user_message(
                 data.get("session_id", ""), data.get("transcript_path", "")
@@ -922,6 +1056,11 @@ def main():
         if client == "codex" and is_codex_internal_thread(data):
             # A parent task owns the user-visible completion. Subagent Stop
             # hooks are internal coordination and can arrive in large bursts.
+            return
+
+        if client == "dsh" and is_dsh_internal_thread(data):
+            # DSH subagents are separate sessions on the same Stop bridge; the
+            # parent session reports the completion the user is waiting for.
             return
 
         if hook == 'stop' and client == "claude":

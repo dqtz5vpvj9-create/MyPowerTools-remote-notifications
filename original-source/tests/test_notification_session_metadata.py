@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -97,6 +99,143 @@ def test_dsh_session_name_from_projection_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("DSH_HOME", str(dsh_home))
     module = load_send_module()
     assert module._dsh_session_name("session-abc") == "DSH 会话标题"
+
+
+def _write_per_session_cache(dsh_home, session_id, title):
+    cache_dir = dsh_home / "storages" / "session_projcache" / "sessions"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / f"{session_id}.json").write_text(json.dumps({
+        "version": 7,
+        "record": {
+            "identity": {"cwd": "/home/chris"},
+            "rows": {"title": {"ver": 1, "seq": 14, "val": title}},
+        },
+    }), encoding="utf-8")
+
+
+def test_dsh_session_name_from_per_session_projection_cache(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    _write_per_session_cache(dsh_home, "session-abc", "新布局标题")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    assert module._dsh_session_name("session-abc") == "新布局标题"
+
+
+def test_dsh_session_name_matches_bare_and_prefixed_ids(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    _write_per_session_cache(dsh_home, "163d04ff-68d8-468e-b39c-030ac72bd8bc", "裸 ID 标题")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    # The hook may report either spelling for the same session file.
+    assert module._dsh_session_name("163d04ff-68d8-468e-b39c-030ac72bd8bc") == "裸 ID 标题"
+    assert module._dsh_session_name("session-163d04ff-68d8-468e-b39c-030ac72bd8bc") == "裸 ID 标题"
+
+
+def test_dsh_stop_message_resolves_session_log_without_transcript_path(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    session_id = "session-abc"
+    session_dir = dsh_home / "sessions" / "--home-chris--" / session_id
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.v3.jsonl").write_text("\n".join([
+        json.dumps({"type": "session", "version": 3, "id": session_id,
+                    "cwd": "/home/chris", "delegationDepth": 0}),
+        json.dumps({"type": "user/message", "data": {
+            "content": [{"type": "text", "text": "修复 DSH 兼容性"}],
+            "source": {"kind": "user"},
+        }}),
+        json.dumps({"type": "assistant/message", "data": {
+            "message": {"content": [
+                {"type": "reasoning", "text": "ignore me"},
+                {"type": "text", "text": "已经修复并验证"},
+            ]}
+        }}),
+    ]), encoding="utf-8")
+    _write_per_session_cache(dsh_home, session_id, "通知兼容性")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    payload = {
+        "session_id": session_id,
+        "transcript_path": None,
+        "cwd": "/home/chris",
+        "hook_event_name": "Stop",
+        "last_assistant_message": None,
+    }
+    assert module._dsh_session_log_path(session_id) == str(session_dir / "session.v3.jsonl")
+    message = module.format_stop_message(payload, "dsh")
+    assert message.startswith("[通知兼容性] 已经修复并验证")
+    assert "> 修复 DSH 兼容性" in message
+
+
+def test_dsh_internal_thread_classifies_subagent_session(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    child = "5ff0bbed-062d-4787-838a-d51b763220f6"
+    child_dir = dsh_home / "sessions" / "--home-chris--" / child
+    child_dir.mkdir(parents=True)
+    (child_dir / "session.v3.jsonl").write_text(json.dumps({
+        "type": "session", "version": 3, "id": child, "cwd": "/home/chris",
+        "parentSession": "session-parent", "origin": "subagent", "delegationDepth": 1,
+    }) + "\n", encoding="utf-8")
+    root = "session-parent"
+    root_dir = dsh_home / "sessions" / "--home-chris--" / root
+    root_dir.mkdir(parents=True)
+    (root_dir / "session.v3.jsonl").write_text(json.dumps({
+        "type": "session", "version": 3, "id": root, "cwd": "/home/chris",
+        "delegationDepth": 0,
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+
+    assert module.is_dsh_internal_thread({"session_id": child}) is True
+    assert module.is_dsh_internal_thread({"session_id": root}) is False
+    # Unreadable metadata fails open so ordinary notifications stay deliverable.
+    assert module.is_dsh_internal_thread({"session_id": "missing"}) is False
+
+
+def test_dsh_internal_thread_reads_compressed_session_header(tmp_path, monkeypatch):
+    zstandard = pytest.importorskip("zstandard")
+    dsh_home = tmp_path / "dsh-home"
+    child = "5ff0bbed-062d-4787-838a-d51b763220f6"
+    child_dir = dsh_home / "sessions" / "--home-chris--" / child
+    child_dir.mkdir(parents=True)
+    header = json.dumps({
+        "type": "session", "version": 3, "id": child, "cwd": "/home/chris",
+        "origin": "subagent", "delegationDepth": 1,
+    }) + "\n"
+    (child_dir / "session.v3.jsonl.zstd").write_bytes(
+        zstandard.ZstdCompressor().compress(header.encode("utf-8"))
+    )
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+
+    assert module._dsh_session_header(child).get("origin") == "subagent"
+    assert module.is_dsh_internal_thread({"session_id": child}) is True
+
+
+def test_dsh_subagent_stop_returns_before_message_formatting(tmp_path, monkeypatch):
+    dsh_home = tmp_path / "dsh-home"
+    child = "5ff0bbed-062d-4787-838a-d51b763220f6"
+    child_dir = dsh_home / "sessions" / "--home-chris--" / child
+    child_dir.mkdir(parents=True)
+    (child_dir / "session.v3.jsonl").write_text(json.dumps({
+        "type": "session", "version": 3, "id": child, "cwd": "/home/chris",
+        "origin": "subagent", "delegationDepth": 1,
+    }) + "\n", encoding="utf-8")
+    monkeypatch.setenv("DSH_HOME", str(dsh_home))
+    module = load_send_module()
+    payload = json.dumps({
+        "session_id": child,
+        "transcript_path": None,
+        "hook_event_name": "Stop",
+    })
+    monkeypatch.setattr(sys, "argv", [
+        "send_notification.py", "--stdin", "--hook", "stop",
+        "--client", "dsh", "--icon", "codex",
+    ])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+    monkeypatch.setattr(module, "format_stop_message", lambda *_args: 1 / 0)
+
+    module.main()
+
 
 
 def test_claude_classifier_keeps_human_typed_and_queued_prompts(tmp_path):
