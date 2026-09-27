@@ -21,7 +21,6 @@ public sealed partial class RemoteNotificationsView
         AttachedToVisualTree += (_, _) =>
             Dispatcher.UIThread.Post(UpdateResponsiveLayout, DispatcherPriority.Loaded);
     }
-
     private void AddMarkVisibleReadButton()
     {
         if (_markVisibleReadButton is not null ||
@@ -44,19 +43,32 @@ public sealed partial class RemoteNotificationsView
 
     private void OnResponsiveSizeChanged(object? sender, SizeChangedEventArgs e)
     {
-        UpdateResponsiveLayout();
+        // Toggling visibility from a SizeChanged handler re-enters the layout pass that raised the
+        // event; reflow after that pass instead (same rule as the other surface views).
+        Dispatcher.UIThread.Post(UpdateResponsiveLayout, DispatcherPriority.Loaded);
     }
+
+    private bool? _compactLayout;
 
     private void UpdateResponsiveLayout()
     {
         var compact = Bounds.Width > 0 && Bounds.Width < CompactToolbarThreshold;
+        if (_compactLayout == compact)
+        {
+            return;
+        }
+
+        _compactLayout = compact;
         if (this.FindControl<Control>("HeaderActions") is { } headerActions)
         {
+            // On phones these actions move into the overflow menu below, so no action is lost.
             headerActions.IsVisible = !compact;
         }
         if (this.FindControl<Control>("ConnectionExpander") is { } connection)
         {
-            connection.IsVisible = !compact;
+            // The connection summary (state, message count, last sync) stays on phones; only the
+            // inline action row moves to the overflow menu.
+            connection.IsVisible = true;
         }
         if (this.FindControl<Control>("OverflowMenuButton") is { } menuButton)
         {

@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:shortcuts="using:MyPowerTools.AvaloniaSdk"
+             xmlns:adaptive="using:MyPowerTools.AvaloniaSdk"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="using:MyPowerTools.UI.Controls"
              xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
@@ -69,10 +70,11 @@
     </Style>
   </UserControl.Styles>
 
+  <Grid>
   <Grid MaxWidth="1280"
         HorizontalAlignment="Stretch"
         RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
-    <Grid Grid.Row="0"
+    <Grid adaptive:MptAdaptiveLayout.StackBelow="600" Grid.Row="0"
           ColumnDefinitions="*,320,Auto"
           ColumnSpacing="14"
           MinHeight="48"
@@ -93,7 +95,7 @@
                 VerticalAlignment="Center"
                 IsExpanded="False">
         <Expander.Header>
-          <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+          <Grid adaptive:MptAdaptiveLayout.StackBelow="600" ColumnDefinitions="Auto,Auto,*,Auto"
                 ColumnSpacing="8"
                 MinHeight="32">
             <Border Width="20"
@@ -119,39 +121,48 @@
                        VerticalAlignment="Center" />
           </Grid>
         </Expander.Header>
-          <Grid ColumnDefinitions="*,*"
+          <Grid adaptive:MptAdaptiveLayout.StackBelow="600" ColumnDefinitions="*,*"
                 RowDefinitions="Auto,Auto,Auto"
                 ColumnSpacing="12"
                 RowSpacing="4"
                 Margin="0,4,0,2">
-            <TextBlock Text="{Binding Server}"
-                       Classes="MptMeta"
-                       TextTrimming="CharacterEllipsis"
-                       ToolTip.Tip="{Binding Server}" />
-            <TextBlock Grid.Column="1"
-                       Text="{Binding LastSyncText}"
-                       Classes="MptMeta"
-                       TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="1"
-                       Text="{Binding SyncResultText}"
-                       Classes="MptMeta"
-                       TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="1"
-                       Grid.Column="1"
-                       Text="{Binding Latest, StringFormat='Latest: {0}'}"
-                       Classes="MptMeta"
-                       TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Row="2"
-                       Text="{Binding Fetched, StringFormat='Fetched: {0}'}"
-                       Classes="MptMeta" />
-            <TextBlock Grid.Row="2"
-                       Grid.Column="1"
-                       Text="{Binding Shown, StringFormat='Shown: {0}'}"
-                       Classes="MptMeta" />
+            <StackPanel Spacing="2">
+              <TextBlock Classes="MptMeta" Text="Server" />
+              <TextBlock Text="{Binding Server}"
+                         Classes="MptMeta"
+                         TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding Server}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="2">
+              <TextBlock Classes="MptMeta" Text="Last sync" />
+              <TextBlock Text="{Binding LastSyncText}"
+                         Classes="MptMeta"
+                         TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Spacing="2">
+              <TextBlock Classes="MptMeta" Text="Sync result" />
+              <TextBlock Text="{Binding SyncResultText}"
+                         Classes="MptMeta"
+                         TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+              <TextBlock Classes="MptMeta" Text="Latest" />
+              <TextBlock Text="{Binding Latest}"
+                         Classes="MptMeta"
+                         TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <StackPanel Grid.Row="2" Spacing="2">
+              <TextBlock Classes="MptMeta" Text="Fetched" />
+              <TextBlock Text="{Binding Fetched}" Classes="MptMeta" />
+            </StackPanel>
+            <StackPanel Grid.Row="2" Grid.Column="1" Spacing="2">
+              <TextBlock Classes="MptMeta" Text="Shown" />
+              <TextBlock Text="{Binding Shown}" Classes="MptMeta" />
+            </StackPanel>
           </Grid>
       </Expander>
 
-      <StackPanel x:Name="HeaderActions"
+      <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" x:Name="HeaderActions"
                   Grid.Column="2"
                   Orientation="Horizontal"
                   Spacing="14"
@@ -211,7 +222,7 @@
             BorderThickness="1"
             Background="{DynamicResource MptBrushCardBackground}"
             IsVisible="{Binding IsSearchVisible}">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto"
+      <Grid adaptive:MptAdaptiveLayout.StackBelow="600" ColumnDefinitions="Auto,*,Auto,Auto"
             RowDefinitions="Auto,Auto" RowSpacing="8"
             ColumnSpacing="10">
         <TextBlock Text="⌕"
@@ -230,7 +241,7 @@
         <controls:MptButton Grid.Column="3"
                             Content="Close"
                             Click="OnCloseSearchClick" />
-        <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.ColumnSpan="4">
+        <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Orientation="Horizontal" Grid.Row="1" Grid.ColumnSpan="4">
           <controls:MptCheckBox Content="Search all labels and Claude Task"
                                 IsChecked="{Binding SearchAllNotifications, Mode=TwoWay}" />
           <TextBlock Text="{Binding SearchScopeText}" Classes="MptMeta" Margin="12,0,0,0"
@@ -255,39 +266,41 @@
                      TextWrapping="Wrap" />
         </StackPanel>
 
-        <Grid ColumnDefinitions="150,*,120"
-              RowDefinitions="Auto,Auto"
+        <!-- Each field carries its own label so the phone layout stays label/value pairs and no
+             input is hidden when the grid stacks. -->
+        <Grid adaptive:MptAdaptiveLayout.StackBelow="600" ColumnDefinitions="150,*,120"
               ColumnSpacing="12"
               RowSpacing="6">
-          <TextBlock Text="Protocol" FontWeight="SemiBold" />
-          <TextBlock Grid.Column="1" Text="Host" FontWeight="SemiBold" />
-          <TextBlock Grid.Column="2" Text="Port" FontWeight="SemiBold" />
-          <controls:MptComboBox Grid.Row="1"
-                                ItemsSource="{Binding ProtocolOptions}"
-                                SelectedItem="{Binding ProtocolDraft, Mode=TwoWay}" />
-          <controls:MptTextBox Grid.Row="1"
-                               Grid.Column="1"
-                               Text="{Binding HostDraft, Mode=TwoWay}"
-                               PlaceholderText="message.example.com" />
-          <controls:MptTextBox Grid.Row="1"
-                               Grid.Column="2"
-                               Text="{Binding PortDraft, Mode=TwoWay}"
-                               PlaceholderText="8888" />
+          <StackPanel Spacing="4">
+            <TextBlock Text="Protocol" FontWeight="SemiBold" />
+            <controls:MptComboBox ItemsSource="{Binding ProtocolOptions}"
+                                  SelectedItem="{Binding ProtocolDraft, Mode=TwoWay}" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="4">
+            <TextBlock Text="Host" FontWeight="SemiBold" />
+            <controls:MptTextBox Text="{Binding HostDraft, Mode=TwoWay}"
+                                 PlaceholderText="message.example.com" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Spacing="4">
+            <TextBlock Text="Port" FontWeight="SemiBold" />
+            <controls:MptTextBox Text="{Binding PortDraft, Mode=TwoWay}"
+                                 PlaceholderText="8888" />
+          </StackPanel>
         </Grid>
 
-        <Grid ColumnDefinitions="*,180"
-              RowDefinitions="Auto,Auto"
+        <Grid adaptive:MptAdaptiveLayout.StackBelow="600" ColumnDefinitions="*,180"
               ColumnSpacing="12"
               RowSpacing="6">
-          <TextBlock Text="Channel" FontWeight="SemiBold" />
-          <TextBlock Grid.Column="1" Text="Poll interval (seconds)" FontWeight="SemiBold" />
-          <controls:MptTextBox Grid.Row="1"
-                               Text="{Binding ChannelDraft, Mode=TwoWay}"
-                               PlaceholderText="default" />
-          <controls:MptTextBox Grid.Row="1"
-                               Grid.Column="1"
-                               Text="{Binding PollIntervalDraft, Mode=TwoWay}"
-                               PlaceholderText="5" />
+          <StackPanel Spacing="4">
+            <TextBlock Text="Channel" FontWeight="SemiBold" />
+            <controls:MptTextBox Text="{Binding ChannelDraft, Mode=TwoWay}"
+                                 PlaceholderText="default" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="4">
+            <TextBlock Text="Poll interval (seconds)" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <controls:MptTextBox Text="{Binding PollIntervalDraft, Mode=TwoWay}"
+                                 PlaceholderText="5" />
+          </StackPanel>
         </Grid>
 
         <StackPanel Spacing="6">
@@ -314,7 +327,7 @@
                      TextWrapping="Wrap" />
         </Border>
 
-        <StackPanel Orientation="Horizontal"
+        <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Orientation="Horizontal"
                     Spacing="10"
                     HorizontalAlignment="Right">
           <controls:MptButton Content="Revert changes"
@@ -335,7 +348,7 @@
             BorderThickness="1"
             Background="{DynamicResource MptBrushWarningBackground}"
             IsVisible="{Binding ShowSyncError}">
-      <Grid RowDefinitions="Auto,Auto"
+      <Grid adaptive:MptAdaptiveLayout.StackBelow="600" RowDefinitions="Auto,Auto"
             ColumnDefinitions="Auto,*,Auto"
             ColumnSpacing="12">
         <TextBlock Text="!"
@@ -348,7 +361,7 @@
           <TextBlock Text="{Binding ErrorSummary}"
                      TextWrapping="Wrap" />
         </StackPanel>
-        <StackPanel Grid.Column="2"
+        <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Grid.Column="2"
                     Orientation="Horizontal"
                     Spacing="{DynamicResource MptSpacingS}"
                     VerticalAlignment="Center">
@@ -446,9 +459,9 @@
 
                 <StackPanel Grid.Column="1"
                             Spacing="{DynamicResource MptSpacingM}">
-                  <Grid ColumnDefinitions="*,Auto"
+                  <Grid adaptive:MptAdaptiveLayout.StackBelow="600" ColumnDefinitions="*,Auto"
                         ColumnSpacing="12">
-                    <StackPanel Orientation="Horizontal"
+                    <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Orientation="Horizontal"
                                 Spacing="{DynamicResource MptSpacingS}">
                       <TextBlock Text="{Binding Label}"
                                  FontWeight="SemiBold"
@@ -504,5 +517,38 @@
         </StackPanel>
       </Border>
     </Grid>
+  </Grid>
+
+    <!--
+      Mobile dialog sheet. Single-view hosts (Android) have no platform window, so Window.ShowDialog
+      cannot present the confirm prompt or the message detail. The same dialog content is hosted here
+      inside the surface instead; the dialog keeps its own handlers and reports the result through
+      its sheet completion instead of Close().
+    -->
+    <Border x:Name="DialogSheet"
+            IsVisible="False"
+            Background="{DynamicResource MptBrushAppBackground}"
+            Padding="{DynamicResource MptUniformL}"
+            KeyDown="OnDialogSheetKeyDown">
+      <Grid RowDefinitions="Auto,*"
+            RowSpacing="10"
+            MaxWidth="760"
+            HorizontalAlignment="Stretch">
+        <Grid ColumnDefinitions="*,Auto"
+              ColumnSpacing="8">
+          <TextBlock x:Name="DialogSheetTitle"
+                     Classes="MptSectionTitle"
+                     TextWrapping="Wrap"
+                     VerticalAlignment="Center" />
+          <controls:MptButton Grid.Column="1"
+                              Content="Close"
+                              Click="OnCloseDialogSheetClick" />
+        </Grid>
+        <ContentControl x:Name="DialogSheetHost"
+                        Grid.Row="1"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>

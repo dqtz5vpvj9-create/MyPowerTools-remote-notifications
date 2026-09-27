@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
@@ -14,7 +15,7 @@ using RemoteNotifications.Surface.ViewModels;
 
 namespace RemoteNotifications.Surface.Views;
 
-public sealed partial class RemoteNotificationDetailWindow : Window
+public sealed partial class RemoteNotificationDetailWindow : Window, IMptSurfaceSheetDialog
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -408,6 +409,47 @@ public sealed partial class RemoteNotificationDetailWindow : Window
         }
     }
 
+    /// <summary>
+    /// Set by the owning surface when this window's content is presented inside an in-surface
+    /// sheet. Single-view hosts (Android) cannot show platform windows, so the dialog must not
+    /// call <see cref="Window.Close()"/> there: it completes this source instead.
+    /// </summary>
+    public TaskCompletionSource<object?>? SheetCompletion { get; set; }
+
+    /// <summary>
+    /// Resolves the clipboard for the current presentation. A window that was never shown has no
+    /// platform clipboard, so sheet presentation reads it from the hosting surface instead.
+    /// </summary>
+    private IClipboard? ResolveClipboard() =>
+        SheetCompletion is null ? Clipboard : TopLevel.GetTopLevel(_fallbackViewer)?.Clipboard;
+
+    /// <summary>
+    /// Removes the embedded markdown web view before the content is hosted outside a real window.
+    /// Sheet hosts (Android single view) have no web view adapter, and attaching one there would
+    /// probe for adapters that cannot exist; the plain-text fallback carries the message instead.
+    /// </summary>
+    public void DetachMarkdownWebView()
+    {
+        ShowFallback(string.Empty);
+        if (_markdownWebView.Parent is Panel panel)
+        {
+            panel.Children.Remove(_markdownWebView);
+        }
+    }
+
+    public void RequestSheetClose() => CompleteSheet();
+
+    private void CompleteSheet()
+    {
+        if (SheetCompletion is { } completion)
+        {
+            completion.TrySetResult(null);
+            return;
+        }
+
+        Close();
+    }
+
     private void OnPreviousClick(object? sender, RoutedEventArgs e)
     {
         NavigatePrevious();
@@ -420,7 +462,8 @@ public sealed partial class RemoteNotificationDetailWindow : Window
 
     private void OnCopyClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not RemoteNotificationMessageViewModel message || Clipboard is null)
+        var clipboard = ResolveClipboard();
+        if (DataContext is not RemoteNotificationMessageViewModel message || clipboard is null)
         {
             return;
         }
@@ -432,16 +475,17 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             {
                 var transfer = new DataTransfer();
                 transfer.Add(DataTransferItem.CreateText(message.Message));
-                await Clipboard.SetDataAsync(transfer);
-                await Clipboard.FlushAsync();
+                await clipboard.SetDataAsync(transfer);
+                await clipboard.FlushAsync();
             });
     }
 
     private void OnCopySessionClick(object? sender, RoutedEventArgs e)
     {
+        var clipboard = ResolveClipboard();
         if (DataContext is not RemoteNotificationMessageViewModel message ||
             !message.HasSession ||
-            Clipboard is null)
+            clipboard is null)
         {
             return;
         }
@@ -453,13 +497,13 @@ public sealed partial class RemoteNotificationDetailWindow : Window
             {
                 var transfer = new DataTransfer();
                 transfer.Add(DataTransferItem.CreateText(message.SessionId));
-                await Clipboard.SetDataAsync(transfer);
-                await Clipboard.FlushAsync();
+                await clipboard.SetDataAsync(transfer);
+                await clipboard.FlushAsync();
             });
     }
 
     private void OnCloseClick(object? sender, RoutedEventArgs e)
     {
-        Close();
+        CompleteSheet();
     }
 }

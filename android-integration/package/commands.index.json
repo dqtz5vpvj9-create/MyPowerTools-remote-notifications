@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "1.0",
+  "commands": [
+    {
+      "id": "remote-notifications-android.open-inbox",
+      "title": "打开远程通知",
+      "subtitle": "查看手机上的通知历史与未读状态",
+      "kind": "open",
+      "category": "远程通知",
+      "execution": {
+        "type": "navigation",
+        "toolId": "remote-notifications-android",
+        "routeId": "main"
+      }
+    },
+    {
+      "id": "remote-notifications-android.status",
+      "title": "查看通知状态",
+      "subtitle": "签名、同步、后台与历史的当前状态",
+      "kind": "action",
+      "category": "远程通知",
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "remote-notifications-android.sync-now",
+      "title": "立即同步通知",
+      "subtitle": "执行一次签名拉取并投递新通知",
+      "kind": "action",
+      "category": "远程通知",
+      "timeoutMs": 30000,
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "remote-notifications-android.inbox.summary",
+      "title": "通知历史摘要",
+      "subtitle": "统计历史条数、标签与最新消息",
+      "kind": "action",
+      "category": "远程通知",
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "remote-notifications-android.polling.start",
+      "title": "开启后台接收",
+      "subtitle": "申请后台任务并在退到后台后继续接收",
+      "kind": "action",
+      "category": "远程通知",
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "remote-notifications-android.polling.stop",
+      "title": "停止后台接收",
+      "subtitle": "释放后台任务并停止轮询",
+      "kind": "action",
+      "category": "远程通知",
+      "execution": {
+        "type": "module.execute"
+      }
+    },
+    {
+      "id": "remote-notifications-android.inbox.clear",
+      "title": "清空通知历史",
+      "subtitle": "删除本机保存的全部通知记录",
+      "kind": "action",
+      "category": "远程通知",
+      "execution": {
+        "type": "module.execute"
+      }
+    }
+  ]
+}

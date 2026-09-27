@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0",
+  "toolId": "remote-notifications-android",
+  "ownerModuleId": "remote-notifications-android",
+  "title": "远程通知",
+  "description": "在手机上接收与桌面端相同的签名远程通知，查看历史、按会话过滤，并可开启后台接收。",
+  "icon": "tool.remote-notifications",
+  "category": "Communication",
+  "type": "dotnet-surface",
+  "availability": "available",
+  "primaryRouteId": "main",
+  "routes": [
+    {
+      "routeId": "main",
+      "surfaceId": "remote-notifications-android.detail",
+      "title": "通知",
+      "icon": "route.inbox",
+      "surface": {
+        "kind": "dotnet",
+        "assembly": "surface/MyPowerTools.MobileNotifications.dll",
+        "type": "MyPowerTools.MobileNotifications.MobileNotificationsSurfaceFactory"
+      }
+    }
+  ],
+  "homeCard": {
+    "summary": "打开手机通知历史，随时同步，并可在需要时开启后台接收。",
+    "primaryActionLabel": "打开远程通知",
+    "statusBinding": "module.status",
+    "order": 20
+  },
+  "activationUriPrefixes": [
+    "mypowertools://remote-notification"
+  ]
+}

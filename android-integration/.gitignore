@@ -1,0 +1,7 @@
+# Generated output of this Android integration. The tool submodule root already ignores these
+# patterns; they are repeated here so an audit of android-integration/ alone can see that no build
+# product (staged APK package, bin, obj) is ever part of the change set.
+artifacts/
+**/bin/
+**/obj/
+*.user

@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Android in-process adapter for the Remote Notifications product.
+
+    The desktop product owns the signed protocol, the reference-block message format and the
+    persisted inbox through RemoteNotifications.Surface.  This adapter compiles those shipped
+    sources directly (the same contract the desktop AndroidTools adapter uses) instead of
+    forking a private copy, so the wire format, the merge semantics and the reference-block
+    parsing cannot drift between Windows/macOS and Android.
+
+    ANDROID_TOOLS_ADAPTER makes the linked types internal to this assembly, matching the
+    desktop adapter and keeping one public module type per assembly.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>RemoteNotifications.Android</AssemblyName>
+    <RootNamespace>RemoteNotifications.Android</RootNamespace>
+    <DefineConstants>$(DefineConstants);ANDROID_TOOLS_ADAPTER</DefineConstants>
+    <!--
+      The Android package ships the adapter next to its private dependencies (BouncyCastle), and the
+      module load context probes exactly that directory on Android. Without this the build output
+      would contain only the adapter assembly and the package would fail its manifest check.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
+    <PackageReference Include="MyPowerTools.Platform.Abstractions" Version="0.2.1" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shipped product sources, linked read-only. Never edit these through this project. -->
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
+             Link="Linked\RemoteNotificationsLegacyStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
+             Link="Linked\RemoteNotificationSettingsStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
+             Link="Linked\RemoteNotificationSeenIdRing.cs" />
+  </ItemGroup>
+
+</Project>

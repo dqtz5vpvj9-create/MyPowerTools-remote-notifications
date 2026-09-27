@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:adaptive="using:MyPowerTools.AvaloniaSdk"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:av="using:Avalonia.Controls"
         xmlns:controls="using:MyPowerTools.UI.Controls"
         xmlns:vm="using:RemoteNotifications.Surface.ViewModels"
@@ -7,7 +8,7 @@
         x:DataType="vm:RemoteNotificationMessageViewModel"
         Width="920"
         Height="720"
-        MinWidth="620"
+
         MinHeight="460"
         Background="{DynamicResource MptBrushAppBackground}"
         KeyDown="OnWindowKeyDown"
@@ -15,7 +16,7 @@
   <Grid RowDefinitions="Auto,*,Auto"
         Margin="{DynamicResource MptCompactPadding}"
         RowSpacing="10">
-    <StackPanel Grid.Row="0"
+    <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Grid.Row="0"
                 Orientation="Horizontal"
                 Spacing="{DynamicResource MptSpacingS}">
       <Border Width="28"
@@ -102,7 +103,7 @@
       </Grid>
     </Border>
 
-    <StackPanel Grid.Row="2"
+    <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Grid.Row="2"
                 Orientation="Horizontal"
                 Spacing="{DynamicResource MptSpacingS}"
                 HorizontalAlignment="Right">

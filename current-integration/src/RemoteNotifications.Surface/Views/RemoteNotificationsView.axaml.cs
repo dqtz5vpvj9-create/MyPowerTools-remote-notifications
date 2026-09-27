@@ -55,6 +55,7 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
+        CloseDialogSheet(null);
         (DataContext as RemoteNotificationsViewModel)?.Deactivate();
         UnsubscribeFromMessageChanges();
         ClearPendingScrollAnchor();
@@ -64,6 +65,96 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
             _hostScroller.SizeChanged -= OnHostScrollerSizeChanged;
             _hostScroller = null;
         }
+    }
+
+    private Window? _sheetDialog;
+    private TaskCompletionSource<object?>? _sheetCompletion;
+
+    /// <summary>
+    /// Presents a tool dialog inside the surface. Single-view hosts (Android) cannot open platform
+    /// windows, so the dialog content is moved into the in-surface sheet and the dialog reports its
+    /// result through <see cref="Window"/>-free sheet completion instead of ShowDialog.
+    /// </summary>
+    private async Task<object?> ShowDialogSheetAsync(Window dialog)
+    {
+        var host = this.FindControl<ContentControl>("DialogSheetHost");
+        var sheet = this.FindControl<Border>("DialogSheet");
+        var title = this.FindControl<TextBlock>("DialogSheetTitle");
+        if (host is null || sheet is null || title is null ||
+            dialog is not IMptSurfaceSheetDialog sheetDialog ||
+            dialog.Content is not Control body)
+        {
+            return null;
+        }
+
+        var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _sheetDialog = dialog;
+        _sheetCompletion = completion;
+        sheetDialog.SheetCompletion = completion;
+        dialog.Content = null;
+        if (body.DataContext is null)
+        {
+            body.DataContext = dialog.DataContext;
+        }
+
+        title.Text = dialog.Title ?? "";
+        host.Content = body;
+        sheet.IsVisible = true;
+        try
+        {
+            return await completion.Task;
+        }
+        finally
+        {
+            _sheetDialog = null;
+            _sheetCompletion = null;
+            sheet.IsVisible = false;
+            host.Content = null;
+            sheetDialog.SheetCompletion = null;
+            dialog.Content = body;
+        }
+    }
+
+    /// <summary>Closes an open sheet, reporting <paramref name="result"/> to its awaiter.</summary>
+    private void CloseDialogSheet(object? result)
+    {
+        _sheetCompletion?.TrySetResult(result);
+    }
+
+    private void OnCloseDialogSheetClick(object? sender, RoutedEventArgs e) => CloseDialogSheet(null);
+
+    private void OnDialogSheetKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (_sheetDialog is RemoteNotificationDetailWindow detail)
+        {
+            detail.RequestSheetClose();
+            return;
+        }
+
+        CloseDialogSheet(null);
+    }
+
+    /// <summary>
+    /// Opens the message detail. Desktop hosts keep the separate detail window; single-view hosts
+    /// present the same content in the surface sheet with the markdown web view detached.
+    /// </summary>
+    private bool OpenMessageDetail(RemoteNotificationMessageViewModel message)
+    {
+        if (TopLevel.GetTopLevel(this) is Window)
+        {
+            return _detailWindows.Open(message);
+        }
+
+        var detail = new RemoteNotificationDetailWindow(message, new RemoteNotificationsLegacyStore());
+        detail.DetachMarkdownWebView();
+        _ = ShowDialogSheetAsync(detail);
+        return true;
     }
 
     private void SubscribeToMessageChanges()
@@ -426,12 +517,13 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
 
     private async Task<bool> ConfirmClearAsync(int count)
     {
+        var dialog = new ClearNotificationsDialog(count);
         if (TopLevel.GetTopLevel(this) is not Window owner)
         {
-            return false;
+            // Single-view host (Android): present the same confirmation inside the surface.
+            return await ShowDialogSheetAsync(dialog) is true;
         }
 
-        var dialog = new ClearNotificationsDialog(count);
         return await dialog.ShowDialog<bool>(owner);
     }
 
@@ -450,7 +542,7 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
             () =>
             {
                 viewModel.AcknowledgeMessage(message);
-                _detailWindows.Open(message);
+                OpenMessageDetail(message);
                 return Task.CompletedTask;
             });
     }
@@ -464,7 +556,7 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
         }
 
         viewModel.AcknowledgeMessage(message);
-        return _detailWindows.Open(message);
+        return OpenMessageDetail(message);
     }
 
     public ValueTask<bool> ActivateAsync(
@@ -569,4 +661,14 @@ public static class RemoteNotificationLabelWheel
         var maximum = Math.Max(0, extent - viewport);
         return Math.Clamp(currentOffset - (wheelDelta * ScrollStep), 0, maximum);
     }
+}
+
+/// <summary>
+/// Implemented by tool dialogs that can report their result when they are hosted inside a surface
+/// sheet. Single-view hosts (Android) cannot show platform windows, so the dialog must not call
+/// <see cref="Avalonia.Controls.Window.Close(object?)"/> there.
+/// </summary>
+internal interface IMptSurfaceSheetDialog
+{
+    TaskCompletionSource<object?>? SheetCompletion { get; set; }
 }

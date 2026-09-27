@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:adaptive="using:MyPowerTools.AvaloniaSdk"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:MyPowerTools.UI.Controls"
         x:Class="RemoteNotifications.Surface.Views.ClearNotificationsDialog"
         Title="Clear notifications"
@@ -15,7 +16,7 @@
                Classes="MptBody"
                TextWrapping="Wrap"
                VerticalAlignment="Center" />
-    <StackPanel Grid.Row="1"
+    <StackPanel adaptive:MptAdaptiveLayout.StackBelow="480" Grid.Row="1"
                 Orientation="Horizontal"
                 Spacing="{DynamicResource MptSpacingS}"
                 HorizontalAlignment="Right">

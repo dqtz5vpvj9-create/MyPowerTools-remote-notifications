@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The shipped desktop toast publisher (parity reference) contains Windows interop. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
+    <PackageReference Include="MyPowerTools.Platform.Abstractions" Version="0.2.1" />
+    <!-- Test-only: asserts the duplicated error-code literals still equal the protocol contract. -->
+    <PackageReference Include="MyPowerTools.Protocol" Version="0.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="System.Text.Json.Nodes" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The shipped Android module sources and the shipped desktop product sources are compiled
+      directly, so these tests can never drift onto a private copy of the protocol, the merge rules
+      or the reference-block format.
+    -->
+    <Compile Include="..\..\src\RemoteNotifications.Android\**\*.cs"
+             Exclude="..\..\src\RemoteNotifications.Android\bin\**;..\..\src\RemoteNotifications.Android\obj\**"
+             LinkBase="Product\Android" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
+             Link="Product\Surface\RemoteNotificationsLegacyStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
+             Link="Product\Surface\RemoteNotificationSettingsStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
+             Link="Product\Surface\RemoteNotificationSeenIdRing.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSessionChain.cs"
+             Link="Product\Surface\RemoteNotificationSessionChain.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationHttpPoller.cs"
+             Link="Product\Surface\RemoteNotificationHttpPoller.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationToastPublisher.cs"
+             Link="Product\Surface\RemoteNotificationToastPublisher.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\WindowsRemoteNotificationToastPlatform.cs"
+             Link="Product\Surface\WindowsRemoteNotificationToastPlatform.cs" />
+    <Compile Include="..\..\..\current-integration\src\AndroidTools.MyPowerTools\RemoteNotificationBackgroundReceiver.cs"
+             Link="Product\Desktop\RemoteNotificationBackgroundReceiver.cs" />
+  </ItemGroup>
+
+</Project>
