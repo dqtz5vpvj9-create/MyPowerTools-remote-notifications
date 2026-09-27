@@ -77,9 +77,12 @@ internal sealed class RemoteNotificationBackgroundPoller : IAsyncDisposable
                 waitingForPeers: false,
                 cancellationToken).ConfigureAwait(false);
             _lease = lease;
-            _lifetime = new CancellationTokenSource();
+            // The loop captures the local, not the field: StopAsync clears the field, and the pool
+            // thread may start after that.
+            var lifetime = new CancellationTokenSource();
+            _lifetime = lifetime;
             _active = true;
-            _loop = Task.Run(() => LoopAsync(_lifetime.Token), CancellationToken.None);
+            _loop = Task.Run(() => LoopAsync(lifetime.Token), CancellationToken.None);
         }
         finally
         {

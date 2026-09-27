@@ -15,6 +15,7 @@ items at the end).
 | Waterline (`since`) from the newest `server_timestamp` with clock-skew clamp | Supported | `RemoteNotificationInboxSynchronizer`; parity test against `RemoteNotificationBackgroundReceiver` |
 | Deduplication across restarts (stable + fallback id ring) | Supported | same store file the desktop client uses; parity + dedup tests |
 | History, labels, filter, seen ids in app-private data | Supported | `<state>/tools/remote-notifications-android/{settings,history}.json` |
+| Mutual exclusion for `history.json` across instances/processes | Supported | `RemoteNotificationAndroidFileLock` via the `Mutex` alias; `HistoryLockTests` (cross-thread, cross-process, 24 concurrent writers, app-private location) |
 | `[label] reply` extraction | Supported | shipped `RemoteNotificationsLegacyStore.ExtractLabel` |
 | Quoted-request handling (leading `>` block, trailing `For reference` / `原文仅供参考`) | Supported | shipped `SplitQuotedRequest`/`AttachQuotedRequest`; parity test on persisted history |
 | Claude Stop duplicate collapse, agent-internal filtering, task-completed merge | Supported | shipped store source, same code path as desktop |
@@ -50,6 +51,7 @@ items at the end).
 | Notification action buttons (reply, mark read from the tray) | Not implemented |
 | Multiple channels side by side | Single configured channel, same as the desktop settings model |
 | Encrypted OpenSSH keys | Rejected with a clear message; the desktop client also requires an unencrypted key |
+| Named-mutex based history lock (desktop implementation) | Not used on Android: the PAL path `/data/local/tmp/.dotnet-*` fails with `EACCES`. The Android build binds the same call shape to an app-private exclusive file lock instead |
 
 ## Open items (not verified here)
 

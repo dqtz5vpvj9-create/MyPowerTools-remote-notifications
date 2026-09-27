@@ -1,4 +1,5 @@
 using MyPowerTools.Platform.Abstractions;
+using RemoteNotifications.Surface.Services;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Crypto.Utilities;
@@ -145,6 +146,8 @@ public sealed class SigningKeyTests
     {
         using var key = TestSigningKey.Create();
         await using var harness = new ModuleHarness();
+        // The background loop must never open a socket from a test, so the pull client is scripted.
+        await harness.UseScriptedPollerAsync(_ => new RemoteNotificationPullResult("idle", [], ""));
         await harness.InitializeAsync();
         await harness.ExecuteAsync(
             RemoteNotificationsAndroidOptions.CommandSigningKeyImport,

@@ -29,6 +29,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      Android has no usable named-mutex PAL path: System.Threading.Mutex with a name creates
+      /data/local/tmp/.dotnet-* via mkdtemp and fails with EACCES, which the module host treats as a
+      module fault. The shipped RemoteNotificationsLegacyStore locks history.json with a named Mutex;
+      compiling it with the simple name `Mutex` bound to the app-private file lock swaps the lock
+      primitive while the shipped source stays byte-for-byte unchanged.
+    -->
+    <Using Include="RemoteNotifications.Android.RemoteNotificationAndroidFileLock" Alias="Mutex" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
     <PackageReference Include="MyPowerTools.Platform.Abstractions" Version="0.2.1" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />

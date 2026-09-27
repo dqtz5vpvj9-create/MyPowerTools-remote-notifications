@@ -25,6 +25,25 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="System.Text.Json.Nodes" />
+    <!--
+      The tests compile the shipped RemoteNotificationsLegacyStore, so they need the same Android lock
+      swap the module and the surface use; otherwise the store would exercise System.Threading.Mutex
+      and the device failure would be untested.
+    -->
+    <Using Include="RemoteNotifications.Android.RemoteNotificationAndroidFileLock" Alias="Mutex" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Built (not referenced) so the cross-process lock test can launch the same adapter in a child. -->
+    <ProjectReference Include="..\RemoteNotifications.Android.LockProbe\RemoteNotifications.Android.LockProbe.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RemoteNotificationsLockProbe</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\RemoteNotifications.Android.LockProbe\bin\$(Configuration)\net10.0\RemoteNotifications.Android.LockProbe.dll</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>

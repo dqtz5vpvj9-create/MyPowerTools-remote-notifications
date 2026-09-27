@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using MyPowerTools.Abstractions;
 using MyPowerTools.Platform.Abstractions;
 using RemoteNotifications.Surface.Services;
@@ -12,9 +13,18 @@ using Org.BouncyCastle.Utilities.IO.Pem;
 
 namespace RemoteNotifications.Android.Tests;
 
-/// <summary>A scratch directory removed when the test finishes.</summary>
+/// <summary>
+/// A scratch directory removed when the test finishes.
+///
+/// It is rooted in the tool's own git-ignored <c>artifacts/</c> tree - never in the OS temp
+/// directory - and it becomes <c>MPT_DATA_ROOT</c> for the duration of the test, so the history lock
+/// files the Android adapter creates stay inside the workspace as well.
+/// </summary>
 internal sealed class TestDirectory : IDisposable
 {
+    private static readonly object Gate = new();
+    private static bool _rootCleaned;
+
     private TestDirectory(string path)
     {
         Path = path;
@@ -24,11 +34,24 @@ internal sealed class TestDirectory : IDisposable
 
     public static TestDirectory Create()
     {
-        var path = System.IO.Path.Combine(
-            System.IO.Path.GetTempPath(),
-            "mpt-remote-notification-android-tests",
-            Guid.NewGuid().ToString("N"));
+        var root = System.IO.Path.Combine(TestPaths.IntegrationRoot, "artifacts", "test-state");
+        lock (Gate)
+        {
+            if (!_rootCleaned)
+            {
+                // Serialized suite: stale scratch from a previous run is safe to drop.
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+
+                _rootCleaned = true;
+            }
+        }
+
+        var path = System.IO.Path.Combine(root, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
+        Environment.SetEnvironmentVariable("MPT_DATA_ROOT", path);
         return new TestDirectory(path);
     }
 
@@ -215,6 +238,8 @@ internal sealed class ModuleHarness : IAsyncDisposable
             BuildProviders(withoutBackgroundCapability));
     }
 
+    private readonly List<TestSigningKey> _ownedKeys = [];
+
     private IReadOnlyDictionary<string, object> BuildProviders(bool withoutBackgroundCapability)
     {
         var providers = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
@@ -264,6 +289,11 @@ internal sealed class ModuleHarness : IAsyncDisposable
         var poller = new ScriptedPoller(respond);
         Module.PollerFactory = (_, _) => poller;
         var material = key ?? TestSigningKey.Create();
+        if (key is null)
+        {
+            _ownedKeys.Add(material);
+        }
+
         await Secrets.SaveAsync(
             RemoteNotificationsAndroidOptions.ModuleId,
             RemoteNotificationsAndroidOptions.SigningKeySecretName,
@@ -308,6 +338,11 @@ internal sealed class ModuleHarness : IAsyncDisposable
     private async ValueTask DisposeCoreAsync()
     {
         await Module.DisposeAsync(CancellationToken.None);
+        foreach (var key in _ownedKeys)
+        {
+            key.Dispose();
+        }
+
         _root.Dispose();
     }
 }
@@ -316,6 +351,12 @@ internal static class TestPaths
 {
     /// <summary>Repository root, resolved from the test assembly location.</summary>
     public static string RepoRoot { get; } = FindRepoRoot();
+
+    /// <summary>Console probe that holds the history lock from a second process.</summary>
+    public static string LockProbeAssembly { get; } = ResolveLockProbe();
+
+    /// <summary>Host used to launch the lock probe.</summary>
+    public static string DotnetHost { get; } = ResolveDotnetHost();
 
     public static string IntegrationRoot { get; } =
         System.IO.Path.Combine(RepoRoot, "tools", "remote-notifications", "android-integration");
@@ -328,6 +369,62 @@ internal static class TestPaths
 
     public static string MobileSurfaceRoot { get; } =
         System.IO.Path.Combine(RepoRoot, "src", "MyPowerTools.MobileNotifications");
+
+    private static string ResolveLockProbe()
+    {
+        var path = typeof(TestPaths).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "RemoteNotificationsLockProbe")
+            ?.Value;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidOperationException(
+                "The lock probe path metadata is missing; add it to RemoteNotifications.Android.Tests.csproj.");
+        }
+
+        var resolved = System.IO.Path.GetFullPath(path);
+        if (!File.Exists(resolved))
+        {
+            throw new FileNotFoundException(
+                "The cross-process lock probe was not built; the ProjectReference must build it first.",
+                resolved);
+        }
+
+        return resolved;
+    }
+
+    private static string ResolveDotnetHost()
+    {
+        var configured = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        {
+            return configured;
+        }
+
+        var process = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(process) &&
+            System.IO.Path.GetFileNameWithoutExtension(process).StartsWith("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return process;
+        }
+
+        foreach (var candidate in new[]
+                 {
+                     System.IO.Path.Combine(Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? "", "dotnet"),
+                     System.IO.Path.Combine(
+                         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                         ".dotnet",
+                         "dotnet")
+                 })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return "dotnet";
+    }
 
     private static string FindRepoRoot()
     {

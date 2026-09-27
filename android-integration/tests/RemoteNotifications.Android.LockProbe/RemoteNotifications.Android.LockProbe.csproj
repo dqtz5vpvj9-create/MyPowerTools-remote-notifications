@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tiny console helper used by RemoteNotifications.Android.Tests to prove that the history lock
+    excludes a *second process*. It links the shipped Android lock adapter and the shipped store
+    sources, so the child performs a real store write with the same implementation the module uses
+    (no copy, no stub).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>RemoteNotifications.Android.LockProbe</AssemblyName>
+    <RootNamespace>RemoteNotifications.Android.LockProbe</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="RemoteNotifications.Android.RemoteNotificationAndroidFileLock" Alias="Mutex" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\RemoteNotifications.Android\RemoteNotificationAndroidFileLock.cs"
+             Link="Linked\RemoteNotificationAndroidFileLock.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
+             Link="Linked\RemoteNotificationsLegacyStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
+             Link="Linked\RemoteNotificationSettingsStore.cs" />
+  </ItemGroup>
+
+</Project>

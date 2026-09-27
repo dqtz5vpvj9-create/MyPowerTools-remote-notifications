@@ -49,6 +49,46 @@ boundary forces it (in-memory signing, Android tray), and `RemoteNotifications.A
 compiles the desktop implementations side by side and asserts equality, so the two clients cannot
 drift apart silently.
 
+## Android history lock (no named mutex)
+
+The shipped `RemoteNotificationsLegacyStore` serializes `history.json` with a *named*
+`System.Threading.Mutex`. On Android the CoreCLR PAL implements a named mutex by creating
+`/data/local/tmp/.dotnet-*` via `mkdtemp`, which the app sandbox denies with `EACCES`; every history
+lock then threw and the module host quarantined the module after three faults. Setting `TMPDIR` in
+`Application.OnCreate` is too late - the PAL path is already resolved, so a clean install or cleared
+app data does not help.
+
+Fix: the shipped store source is compiled **byte-for-byte unchanged**. `RemoteNotificationAndroidFileLock`
+implements the exact call shape the store uses (`new Mutex(false, name)`, `WaitOne(TimeSpan)`,
+`ReleaseMutex()`, `Dispose()`), and each project that compiles the store binds the simple name
+`Mutex` to it:
+
+```xml
+<Using Include="RemoteNotifications.Android.RemoteNotificationAndroidFileLock" Alias="Mutex" />
+```
+
+Applied in `src/RemoteNotifications.Android`, `src/MyPowerTools.MobileNotifications` and the test
+project (the lock probe uses the same alias). The lock primitive therefore changes; nothing else
+does - protocol, format, reference blocks and merge rules are still the shipped code.
+
+Only the call contract the store uses is implemented - construct unowned, `WaitOne(TimeSpan)` once,
+  `ReleaseMutex()`, `Dispose()`:
+
+- **cross-instance and cross-process**: the lock file is `<state root>/notification-locks/<token>.lock`,
+  opened with `FileShare.None`, which is an OS exclusive lock on Android (flock-backed);
+- **name**: the store's own lock name already ends in the deterministic token derived from the state
+  path; the file name is that token (`Path.GetFileName` after slash normalization), so the same state
+  path always maps to the same lock file - no new hashing, no sanitizing or truncation fallbacks;
+- **app-private and temp-free**: the state root is `MPT_DATA_ROOT/state` when the host sets it,
+  otherwise the app-private `MyPowerTools/state`; there is deliberately no temp-directory fallback;
+- **bounded, monotonic wait**: `WaitOne` measures the timeout with `Stopwatch` and retries only a real
+  sharing violation (`ERROR_SHARING_VIOLATION` on Windows, `EAGAIN` errno 11 on Android/Linux, 35 on
+  macOS); any other IO or permission error surfaces instead of being retried as contention. Returning
+  `false` after the timeout preserves the store's
+  `TimeoutException("Remote notification history is busy.")` contract;
+- **crash safety**: the OS drops the lock when the process dies, so a killed app cannot leave the
+  history permanently locked.
+
 ## Background polling rules
 
 - The module never acquires background work at app start, module start or settings apply.
@@ -70,6 +110,13 @@ dotnet test -c Release tools/remote-notifications/android-integration/tests/Remo
 # stage the APK-ready package (writes android-integration/artifacts/package/remote-notifications-android)
 pwsh -NoLogo -NoProfile -NonInteractive -File tools/remote-notifications/android-integration/build.ps1 -MyPowerToolsRepoRoot <repo>
 ```
+
+The history lock is covered by `HistoryLockTests`: real exclusion across threads and across a
+**second process** (the `RemoteNotifications.Android.LockProbe` helper performs a real store write
+that stays blocked until the first process releases), a real store write that blocks while the lock is
+held, three shared store instances under 24 concurrent writers, and the app-private lock location. A
+drift guard also fails the suite if a project stops binding the alias or the shipped store stops using
+`new Mutex(false, mutexName)`.
 
 See `PARENT_INTEGRATION.md` for the exact host/APK wiring the parent agent must own, and
 `SUPPORT_MATRIX.md` for what the MPT notification product supports on Android today.

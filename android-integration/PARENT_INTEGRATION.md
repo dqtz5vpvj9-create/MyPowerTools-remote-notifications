@@ -105,6 +105,18 @@ and, if the Android solution should run this module's suite, the test project as
   `RemoteNotificationsAndroidOptions` and the phone surface command literals; the manifest tests
   fail until all of them agree.
 
+## 3b. Android history lock (already handled, no host change)
+
+The module and the phone surface no longer use a named `System.Threading.Mutex` for `history.json`.
+On Android the PAL creates `/data/local/tmp/.dotnet-*` for a named mutex and the app sandbox returns
+`EACCES`, which faulted the module three times and quarantined it; setting `TMPDIR` in
+`Application.OnCreate` is too late because the PAL path is already resolved. The shipped store source
+is compiled unchanged and the simple name `Mutex` is bound to
+`RemoteNotificationAndroidFileLock`, an app-private exclusive file lock at
+`<state>/notification-locks/<token>.lock` (`MPT_DATA_ROOT/state` when set, otherwise
+`<LocalAppData>/MyPowerTools/state`). No host, manifest or `TMPDIR` change is required, and no
+temp directory is used.
+
 ## 4. Signing key provisioning (product decision, no code needed)
 
 The phone cannot read `~/.ssh/id_ed25519`, and the module refuses to write private key material to a
