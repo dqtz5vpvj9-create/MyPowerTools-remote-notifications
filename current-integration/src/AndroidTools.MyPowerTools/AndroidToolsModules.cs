@@ -655,6 +655,10 @@ public sealed class AndroidToolsProcessMonitorModule : AndroidToolsModuleBase
             }
 
             Shared.SaveProcessWatchList(names);
+            if (_settings is not null)
+            {
+                _settings["processes"] = ToJsonArray(names);
+            }
             return ValueTask.FromResult(Succeeded(request, new JsonObject
             {
                 ["saved"] = names.Count,
@@ -746,10 +750,7 @@ public sealed class AndroidToolsProcessMonitorModule : AndroidToolsModuleBase
         var merged = SettingsJson.Merge(DefaultProcessSettings(Shared.LoadProcessWatchList()), snapshot.Values);
         _settings = merged;
         var names = SettingsJson.ReadStringArray(merged, "processes");
-        if (names.Count > 0)
-        {
-            Shared.SaveProcessWatchList(names);
-        }
+        Shared.SaveProcessWatchList(names);
 
         return ValueTask.FromResult(snapshot with { Values = (JsonObject)merged.DeepClone() });
     }
