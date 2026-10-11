@@ -6,6 +6,25 @@ namespace RemoteNotifications.Configuration.Tests;
 public sealed class RemoteNotificationsLegacyStoreTests
 {
     [Fact]
+    public void Inbox_transaction_preserves_filter_and_concurrent_seen_ids_with_full_unicode_history()
+    {
+        using var fixture = TestDirectory.Create();
+        var reader = NewStore(fixture);
+        var writer = NewStore(fixture);
+        writer.SaveFilter("selected");
+        writer.SaveSeenMessageIds(["earlier-id"]);
+        var message = Message("new", "[build] 中文🙂\n" + new string('x', 100_000), DateTimeOffset.UtcNow);
+        writer.SaveInbox([message], ["new", "discarded-from-history"], ["build"]);
+        var snapshot = reader.Load();
+        Assert.Equal(message, Assert.Single(snapshot.MessagesOldestFirst));
+        Assert.Equal("selected", snapshot.FilterLabel);
+        Assert.Contains("earlier-id", snapshot.SeenMessageIds!);
+        Assert.Contains("discarded-from-history", snapshot.SeenMessageIds!);
+        Assert.Contains("build", snapshot.KnownLabels);
+        Assert.Same(snapshot, reader.Load());
+    }
+
+    [Fact]
     public void Cached_inbox_observes_another_store_write_and_local_read_state_changes()
     {
         using var fixture = TestDirectory.Create();

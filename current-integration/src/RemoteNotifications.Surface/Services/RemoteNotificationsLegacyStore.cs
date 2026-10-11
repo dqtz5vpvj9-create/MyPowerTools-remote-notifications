@@ -280,6 +280,34 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         return new RemoteNotificationsSnapshot(messages, knownLabels, filter, persistent, seen);
     }
 
+    /// <summary>Commits the received inbox, dedup ring and labels in one history transaction.</summary>
+    public void SaveInbox(
+        IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst,
+        IReadOnlyList<string> seenMessageIdsOldestFirst,
+        IReadOnlyList<string> labels)
+    {
+        if (_statePath is null)
+        {
+            SaveMessages(messagesOldestFirst);
+            SaveSeenMessageIds(seenMessageIdsOldestFirst);
+            SaveKnownLabels(labels);
+            return;
+        }
+
+        WithFileLock(() =>
+        {
+            var state = ReadFileStateUnsafe();
+            state.Messages = CleanupClaudeStopNoise(messagesOldestFirst).TakeLast(MaximumMessages).ToList();
+            state.SeenMessageIds = MergeSeenIds(
+                state.SeenMessageIds.Concat(seenMessageIdsOldestFirst).Distinct(StringComparer.Ordinal).ToList(),
+                state.Messages);
+            state.KnownLabels = labels.Distinct(StringComparer.Ordinal).ToList();
+            WriteFileStateUnsafe(state);
+            var snapshot = ToSnapshot(state, _settingsStore.Load().KeepWindowsBanners);
+            Volatile.Write(ref _cachedInbox, new CachedInbox(snapshot, HistoryStamp()));
+        });
+    }
+
     public void SaveMessages(IReadOnlyList<RemoteNotificationRecord> messagesOldestFirst)
     {
         if (_statePath is not null)
@@ -477,9 +505,8 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
 
         try
         {
-            return JsonSerializer.Deserialize<PersistedState>(
-                File.ReadAllText(_statePath),
-                JsonOptions) ?? new PersistedState();
+            using var stream = File.OpenRead(_statePath);
+            return JsonSerializer.Deserialize<PersistedState>(stream, JsonOptions) ?? new PersistedState();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -498,7 +525,10 @@ sealed class RemoteNotificationsLegacyStore : IRemoteNotificationsStore
         var temporary = $"{statePath}.{Guid.NewGuid():N}.tmp";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(state, JsonOptions));
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, state, JsonOptions);
+            }
             File.Move(temporary, statePath, overwrite: true);
         }
         finally

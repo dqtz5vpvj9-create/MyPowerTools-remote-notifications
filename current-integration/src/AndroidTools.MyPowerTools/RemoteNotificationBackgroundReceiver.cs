@@ -74,8 +74,6 @@ internal sealed class RemoteNotificationBackgroundReceiver
             .OrderBy(NotificationTime)
             .TakeLast(RemoteNotificationsLegacyStore.MaximumMessages)
             .ToArray();
-        _store.SaveMessages(merged);
-        _store.SaveSeenMessageIds(seen.OldestFirst);
 
         var labels = snapshot.KnownLabels.ToList();
         foreach (var notification in accepted)
@@ -84,7 +82,7 @@ internal sealed class RemoteNotificationBackgroundReceiver
             labels.Remove(label);
             labels.Insert(0, label);
         }
-        _store.SaveKnownLabels(labels);
+        _store.SaveInbox(merged, seen.OldestFirst, labels);
 
         return new RemoteNotificationBackgroundPoll(result, accepted, _waterline);
     }

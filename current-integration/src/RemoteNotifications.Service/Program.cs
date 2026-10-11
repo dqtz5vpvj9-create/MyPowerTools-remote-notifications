@@ -253,8 +253,6 @@ static bool RunOnePollCycle(
         .OrderBy(NotificationTime)
         .TakeLast(RemoteNotificationsLegacyStore.MaximumMessages)
         .ToArray();
-    store.SaveMessages(merged);
-    store.SaveSeenMessageIds(seen.OldestFirst);
 
     var labels = snapshot.KnownLabels.ToList();
     foreach (var notification in accepted)
@@ -263,7 +261,7 @@ static bool RunOnePollCycle(
         labels.Remove(label);
         labels.Insert(0, label);
     }
-    store.SaveKnownLabels(labels);
+    store.SaveInbox(merged, seen.OldestFirst, labels);
 
     // Backfill is historical reconstruction. Persist it without replaying
     // hundreds of old Windows banners after every worker restart.
@@ -560,14 +558,12 @@ static object HandleInjectCore(
         .OrderBy(NotificationTime)
         .TakeLast(RemoteNotificationsLegacyStore.MaximumMessages)
         .ToArray();
-    store.SaveMessages(merged);
-    store.SaveSeenMessageIds(seen.OldestFirst);
 
     var labels = snapshot.KnownLabels.ToList();
     var label = RemoteNotificationsLegacyStore.ExtractLabel(record.Message);
     labels.Remove(label);
     labels.Insert(0, label);
-    store.SaveKnownLabels(labels);
+    store.SaveInbox(merged, seen.OldestFirst, labels);
 
     var shown = DispatchBanners([record], false, desktopNotifications);
     state.RecordInject(stableId, shown);
