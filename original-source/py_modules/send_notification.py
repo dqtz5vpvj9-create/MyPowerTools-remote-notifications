@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import ntpath
 import re
 import sys
 import os
@@ -172,10 +173,10 @@ def _codex_goal_objective(text: str) -> str | None:
 def _cursor_workspace_name(data: dict) -> str:
     roots = data.get("workspace_roots") or []
     if roots:
-        return os.path.basename(str(roots[0]).rstrip("\\/"))
+        return ntpath.basename(str(roots[0]).rstrip("\\/"))
     cwd = data.get("cwd") or ""
     if cwd:
-        return os.path.basename(str(cwd).rstrip("\\/"))
+        return ntpath.basename(str(cwd).rstrip("\\/"))
     return ""
 
 
@@ -701,7 +702,9 @@ def label_for_payload(data: dict, client: str) -> str:
     if not cwd:
         roots = data.get("workspace_roots") or []
         cwd = roots[0] if roots else ""
-    return session_name or os.path.basename(str(cwd).rstrip("\\/")) or client_name(client)
+    # Producer paths can use Windows separators even when this hook runs on Unix.
+    # Normalize only the display label; transcript paths must retain their native form.
+    return session_name or ntpath.basename(str(cwd).rstrip("\\/")) or client_name(client)
 
 
 def _explicit_agent_internal_kind(content_kind: object) -> bool:

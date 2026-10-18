@@ -8,6 +8,7 @@
     <AssemblyName>RemoteNotifications.Service</AssemblyName>
     <RootNamespace>RemoteNotifications.Service</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>$(DefineConstants);REMOTE_NOTIFICATIONS_SERVICE</DefineConstants>
     <Description>
       Remote Notifications Service Unit process, supervised by MyPowerTools.ServiceManager.
       Owns the signed-pull polling loop, dedup, persisted history, topic indexing and
@@ -33,9 +34,11 @@
   <!-- The worker reuses the real product business logic (no duplication of the signed puller,
        dedup/history store or seen-id ring). These are the Surface originals (public visibility,
        no ANDROID_TOOLS_ADAPTER define), so the worker compiles the exact same classes the Shell
-       Surface uses. The Windows toast COM path is reimplemented locally in ToastRuntime.cs so
-       the worker never takes an Avalonia dependency. -->
+       Surface uses. The shared Windows toast COM ABI has no Avalonia dependency;
+       ToastRuntime.cs retains the worker-specific registration and executable selection. -->
   <ItemGroup>
+    <Compile Include="..\RemoteNotifications.Surface\Services\WindowsToastAbi.cs"
+             Link="Shared\WindowsToastAbi.cs" />
     <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
              Link="Shared\RemoteNotificationSettingsStore.cs" />
     <Compile Include="..\RemoteNotifications.Surface\Services\RemoteNotificationHttpPoller.cs"

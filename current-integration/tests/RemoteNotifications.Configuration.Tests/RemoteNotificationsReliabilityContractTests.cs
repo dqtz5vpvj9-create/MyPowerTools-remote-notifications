@@ -14,7 +14,12 @@ public sealed class RemoteNotificationsReliabilityContractTests
         Assert.Contains("if (RunOnePollCycle(state, desktopNotifications, startupBackfillPending))", worker, StringComparison.Ordinal);
         Assert.Contains("settingsStore.LoadValidation()", worker, StringComparison.Ordinal);
         Assert.Contains("return pull.IsSuccess;", worker, StringComparison.Ordinal);
-        Assert.Contains("var persistedWaterline = ResolveWaterline", worker, StringComparison.Ordinal);
+        // The cursor is now resolved once per snapshot and cached on the worker state rather than
+        // recomputed every cycle, which is the point of the inbox-scan work. The property this
+        // test cares about - that the cursor comes from persisted state - is unchanged, so the
+        // assertion follows the two statements that carry it instead of the old single line.
+        Assert.Contains("state.PersistedWaterline = ResolveWaterline(", worker, StringComparison.Ordinal);
+        Assert.Contains("var persistedWaterline = state.PersistedWaterline;", worker, StringComparison.Ordinal);
         Assert.Contains("var performBackfill = startupBackfill && string.IsNullOrWhiteSpace(persistedWaterline);", worker, StringComparison.Ordinal);
         Assert.Contains("var shown = performBackfill", worker, StringComparison.Ordinal);
         Assert.Contains("performBackfill ? RemoteNotificationsLegacyStore.MaximumMessages : null", worker, StringComparison.Ordinal);

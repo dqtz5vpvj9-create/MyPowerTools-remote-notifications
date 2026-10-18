@@ -637,11 +637,6 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         OnPropertyChanged(nameof(ShowInboxLabels));
     }
 
-    private void PersistMessages()
-    {
-        _store.SaveMessages(Messages.Reverse().Select(message => message.Source).ToArray());
-    }
-
     private RemoteNotificationRecord[] CaptureVisibleMessageSources()
     {
         return VisibleMessages.Select(message => message.Source).ToArray();
