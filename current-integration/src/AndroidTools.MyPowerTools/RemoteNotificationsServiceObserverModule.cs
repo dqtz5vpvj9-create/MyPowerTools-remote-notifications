@@ -16,7 +16,6 @@ namespace AndroidTools.MyPowerTools;
 /// </summary>
 public sealed partial class RemoteNotificationsServiceObserverModule : IMptModule
 {
-    private ModuleContext? _context;
     private RemoteNotificationSettingsStore? _settingsStore;
     private RemoteNotificationsLegacyStore? _store;
     private string _sharedDataDirectory = "";
@@ -26,9 +25,6 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
     public string Id => "android-tools.notifications";
     public string PackageId => "android-tools-suite";
     public Version Version => new(0, 2, 0);
-
-    private ModuleContext Context =>
-        _context ?? throw new InvalidOperationException("Remote Notifications was not initialized.");
 
     private RemoteNotificationSettingsStore SettingsStore =>
         _settingsStore ?? throw new InvalidOperationException("Remote Notifications was not initialized.");
@@ -41,7 +37,6 @@ public sealed partial class RemoteNotificationsServiceObserverModule : IMptModul
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _context = context;
         _disposed = false;
         _sharedDataDirectory = ResolveSharedToolDataDirectory(context.DataDirectory);
         Directory.CreateDirectory(_sharedDataDirectory);

@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -602,6 +604,27 @@ def test_cursor_payload_overrides_claude_client(tmp_path):
     assert "[demo] 只看这条助手消息" in message
     assert "Task completed" not in message
     assert module.client_name("cursor") == "Cursor"
+
+
+@pytest.mark.parametrize("workspace", [
+    r"C:\work\demo",
+    "C:\\work\\demo\\",
+    r"\\server\share\demo",
+    "\\\\server\\share\\demo\\",
+    "/home/user/demo",
+    "/home/user/demo/",
+])
+def test_workspace_labels_accept_producer_path_styles_without_rewriting_paths(workspace, monkeypatch):
+    module = load_send_module()
+    transcript = r"C:\sessions\original.jsonl"
+    payload = {"workspace_roots": [workspace], "transcript_path": transcript}
+    assert module._cursor_workspace_name(payload) == "demo"
+    assert module._cursor_workspace_name({"cwd": workspace}) == "demo"
+
+    monkeypatch.setattr(module, "get_session_name", lambda *_args: "")
+    assert module.label_for_payload(payload, "codex") == "demo"
+    assert module.label_for_payload({"cwd": workspace}, "codex") == "demo"
+    assert payload == {"workspace_roots": [workspace], "transcript_path": transcript}
 
 
 def test_banner_text_omits_quoted_user_request():
