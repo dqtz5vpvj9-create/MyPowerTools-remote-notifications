@@ -573,6 +573,23 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
             string.Equals(message.FallbackId, messageId, StringComparison.Ordinal));
     }
 
+    public RemoteNotificationMessageViewModel? ResolveMessageForActivation(string messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId)) return null;
+        var loaded = FindMessageById(messageId);
+        if (loaded is not null)
+        {
+            return loaded;
+        }
+
+        // The service persists before showing a toast. A hidden or detached feed
+        // may not have observed that write yet; activation must not wait for polling.
+        return RemoteNotificationDetailWindowService.TryFindRecord(
+            _store.Load().MessagesOldestFirst, messageId, out var persisted)
+            ? new RemoteNotificationMessageViewModel(persisted)
+            : null;
+    }
+
     private Task SelectFilterAsync(string? label)
     {
         if (label is not null)

@@ -458,7 +458,7 @@ public sealed partial class RemoteNotificationsView : UserControl, IMptAvaloniaS
     public bool TryOpenMessageById(string messageId)
     {
         if (DataContext is not RemoteNotificationsViewModel viewModel ||
-            viewModel.FindMessageById(messageId) is not { } message)
+            viewModel.ResolveMessageForActivation(messageId) is not { } message)
         {
             return false;
         }
