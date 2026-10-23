@@ -16,6 +16,9 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
+    <Compile Include="..\..\src\RemoteNotifications.Service\ProductActivationLauncher.cs"
+             Link="Product\ProductActivationLauncher.cs" />
     <!--
       These are the files RemoteNotifications.Surface actually ships. Compile the
       shipped sources directly so the suite never drifts onto a private copy, and
