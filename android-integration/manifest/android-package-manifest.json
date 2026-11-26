@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.0",
+  "packageId": "remote-notifications-android",
+  "moduleId": "remote-notifications-android",
+  "toolId": "remote-notifications-android",
+  "platforms": [
+    "android-arm64",
+    "android-x64"
+  ],
+  "packageRoot": "tools/remote-notifications/android-integration/artifacts/package/remote-notifications-android",
+  "apkAssetRoot": "modules/remote-notifications-android",
+  "notes": [
+    "android-integration/build.ps1 stages this package and fails if any required file is missing.",
+    "The host bundles the whole package root into the APK assets; the Shell resolves the surface from ui/tool.json.",
+    "MyPowerTools.* assemblies are intentionally not listed: the host resolves Abstractions, Platform.Abstractions and AvaloniaSdk from its own load context."
+  ],
+  "files": [
+    {
+      "path": "module.json",
+      "role": "module-manifest",
+      "source": "package/module.json",
+      "required": true
+    },
+    {
+      "path": "commands.index.json",
+      "role": "command-index",
+      "source": "package/commands.index.json",
+      "required": true
+    },
+    {
+      "path": "ui/tool.json",
+      "role": "tool-manifest",
+      "source": "package/ui/tool.json",
+      "required": true
+    },
+    {
+      "path": "ui/dashboard-card.json",
+      "role": "ui-descriptor",
+      "source": "package/ui/dashboard-card.json",
+      "required": true
+    },
+    {
+      "path": "ui/detail-page.json",
+      "role": "ui-descriptor",
+      "source": "package/ui/detail-page.json",
+      "required": true
+    },
+    {
+      "path": "ui/settings.json",
+      "role": "ui-descriptor",
+      "source": "package/ui/settings.json",
+      "required": true
+    },
+    {
+      "path": "ui/logs.json",
+      "role": "ui-descriptor",
+      "source": "package/ui/logs.json",
+      "required": true
+    },
+    {
+      "path": "RemoteNotifications.Android.dll",
+      "role": "module-adapter",
+      "source": "src/RemoteNotifications.Android/RemoteNotifications.Android.csproj",
+      "required": true,
+      "platforms": [
+        "android-arm64",
+        "android-x64"
+      ]
+    },
+    {
+      "path": "ui/surface/MyPowerTools.MobileNotifications.dll",
+      "role": "tool-surface",
+      "source": "src/MyPowerTools.MobileNotifications/MyPowerTools.MobileNotifications.csproj",
+      "required": true
+    },
+    {
+      "path": "BouncyCastle.Cryptography.dll",
+      "role": "module-dependency",
+      "source": "NuGet BouncyCastle.Cryptography 2.6.2 (same version as the desktop product)",
+      "required": true
+    }
+  ]
+}

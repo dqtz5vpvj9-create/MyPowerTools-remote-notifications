@@ -15,7 +15,9 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion Condition="'$(LangVersion)' == ''">preview</LangVersion>
+    <RollForward Condition="'$(RollForward)' == ''">Major</RollForward>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DefineConstants>$(DefineConstants);ANDROID_TOOLS_ADAPTER</DefineConstants>

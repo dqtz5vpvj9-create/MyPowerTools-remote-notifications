@@ -73,7 +73,7 @@ internal static class ProductActivationLauncher
                         "MyPowerTools.App",
                         "bin",
                         configuration,
-                        "net10.0",
+                        "net8.0",
                         ExecutableName("MyPowerTools"));
                     if (File.Exists(developmentExecutable))
                     {

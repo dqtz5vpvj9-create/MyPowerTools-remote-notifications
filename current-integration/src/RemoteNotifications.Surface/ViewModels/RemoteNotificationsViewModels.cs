@@ -806,6 +806,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         var meaningfulLine = error
             .Replace('\r', '\n')
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .AsEnumerable()
             .Reverse()
             .FirstOrDefault(line =>
                 !line.StartsWith("Traceback", StringComparison.OrdinalIgnoreCase) &&

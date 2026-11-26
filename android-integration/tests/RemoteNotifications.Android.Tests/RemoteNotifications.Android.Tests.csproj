@@ -1,0 +1,80 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion Condition="'$(LangVersion)' == ''">preview</LangVersion>
+    <RollForward Condition="'$(RollForward)' == ''">Major</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The shipped desktop toast publisher (parity reference) contains Windows interop. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="MyPowerTools.ToolSdk" Version="0.2.0" />
+    <PackageReference Include="MyPowerTools.Platform.Abstractions" Version="0.3.0" />
+    <!-- Test-only: asserts the duplicated error-code literals still equal the protocol contract. -->
+    <PackageReference Include="MyPowerTools.Protocol" Version="0.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="System.Text.Json.Nodes" />
+    <!--
+      The tests compile the shipped RemoteNotificationsLegacyStore, so they need the same Android lock
+      swap the module and the surface use; otherwise the store would exercise System.Threading.Mutex
+      and the device failure would be untested.
+    -->
+    <Using Include="RemoteNotifications.Android.RemoteNotificationAndroidFileLock" Alias="Mutex" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Built (not referenced) so the cross-process lock test can launch the same adapter in a child. -->
+    <ProjectReference Include="..\RemoteNotifications.Android.LockProbe\RemoteNotifications.Android.LockProbe.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>RemoteNotificationsLockProbe</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\RemoteNotifications.Android.LockProbe\bin\$(Configuration)\net8.0\RemoteNotifications.Android.LockProbe.dll</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The shipped Android module sources and the shipped desktop product sources are compiled
+      directly, so these tests can never drift onto a private copy of the protocol, the merge rules
+      or the reference-block format.
+    -->
+    <Compile Include="..\..\src\RemoteNotifications.Android\**\*.cs"
+             Exclude="..\..\src\RemoteNotifications.Android\bin\**;..\..\src\RemoteNotifications.Android\obj\**"
+             LinkBase="Product\Android" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationsLegacyStore.cs"
+             Link="Product\Surface\RemoteNotificationsLegacyStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSettingsStore.cs"
+             Link="Product\Surface\RemoteNotificationSettingsStore.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSeenIdRing.cs"
+             Link="Product\Surface\RemoteNotificationSeenIdRing.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationSessionChain.cs"
+             Link="Product\Surface\RemoteNotificationSessionChain.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationHttpPoller.cs"
+             Link="Product\Surface\RemoteNotificationHttpPoller.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\RemoteNotificationToastPublisher.cs"
+             Link="Product\Surface\RemoteNotificationToastPublisher.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\WindowsRemoteNotificationToastPlatform.cs"
+             Link="Product\Surface\WindowsRemoteNotificationToastPlatform.cs" />
+    <Compile Include="..\..\..\current-integration\src\RemoteNotifications.Surface\Services\WindowsToastAbi.cs"
+             Link="Product\Surface\WindowsToastAbi.cs" />
+    <Compile Include="..\..\..\current-integration\src\AndroidTools.MyPowerTools\RemoteNotificationBackgroundReceiver.cs"
+             Link="Product\Desktop\RemoteNotificationBackgroundReceiver.cs" />
+  </ItemGroup>
+
+</Project>
