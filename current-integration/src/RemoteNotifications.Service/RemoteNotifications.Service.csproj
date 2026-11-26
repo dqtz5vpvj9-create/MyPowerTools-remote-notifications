@@ -9,6 +9,7 @@
     <RootNamespace>RemoteNotifications.Service</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefineConstants>$(DefineConstants);REMOTE_NOTIFICATIONS_SERVICE</DefineConstants>
+    <DefineConstants Condition="$([MSBuild]::IsOSPlatform('OSX'))">$(DefineConstants);MPT_PLATFORM_MAC</DefineConstants>
     <Description>
       Remote Notifications Service Unit process, supervised by MyPowerTools.ServiceManager.
       Owns the signed-pull polling loop, dedup, persisted history, topic indexing and
@@ -28,7 +29,7 @@
     <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Abstractions\MyPowerTools.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Ipc.Shared\MyPowerTools.Ipc.Shared.csproj" />
     <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Platform.Abstractions\MyPowerTools.Platform.Abstractions.csproj" />
-    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Platform.Mac\MyPowerTools.Platform.Mac.csproj" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Platform.Mac\MyPowerTools.Platform.Mac.csproj" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
   </ItemGroup>
 
   <!-- The worker reuses the real product business logic (no duplication of the signed puller,

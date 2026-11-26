@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AndroidTools.MyPowerTools\AndroidTools.MyPowerTools.csproj" />
     <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Ipc.Shared\MyPowerTools.Ipc.Shared.csproj" />
+    <ProjectReference Include="..\..\..\..\..\src\MyPowerTools.Ipc.AspNetCore\MyPowerTools.Ipc.AspNetCore.csproj" />
   </ItemGroup>
 
 </Project>

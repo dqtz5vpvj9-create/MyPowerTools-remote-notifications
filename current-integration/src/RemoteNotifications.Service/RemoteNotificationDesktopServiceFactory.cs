@@ -1,6 +1,8 @@
 using System.Text.Json;
 using MyPowerTools.Platform.Abstractions;
+#if MPT_PLATFORM_MAC
 using MyPowerTools.Platform.Mac;
+#endif
 
 namespace RemoteNotifications.Service;
 
@@ -67,6 +69,7 @@ internal static class RemoteNotificationDesktopServiceFactory
             return null;
         }
 
+#if MPT_PLATFORM_MAC
         var service = new MacUserNotificationService();
         var authorization = service.GetAuthorizationStatus();
         SetSnapshot(new RemoteNotificationDeliverySnapshot(
@@ -84,6 +87,9 @@ internal static class RemoteNotificationDesktopServiceFactory
             "",
             ""));
         return new ReportingNotificationService(service);
+#else
+        return null;
+#endif
     }
 
     public static RemoteNotificationDeliverySnapshot Snapshot()
@@ -124,7 +130,11 @@ internal static class RemoteNotificationDesktopServiceFactory
                 $"The macOS recording backend could not find the native notification library at '{nativeLibrary}'.");
         }
 
+#if MPT_PLATFORM_MAC
         var authorization = new MacUserNotificationService().GetAuthorizationStatus();
+#else
+        var authorization = "unsupported";
+#endif
         if (authorization is not ("authorized" or "provisional" or "not-determined" or "denied"))
         {
             throw new InvalidOperationException(
@@ -232,6 +242,7 @@ internal static class RemoteNotificationDesktopServiceFactory
         }
     }
 
+#if MPT_PLATFORM_MAC
     private sealed class ReportingNotificationService(
         MacUserNotificationService inner) : INotificationService
     {
@@ -267,6 +278,7 @@ internal static class RemoteNotificationDesktopServiceFactory
             }
         }
     }
+#endif
 
     private sealed class RecordingNotificationService(
         string path,
@@ -305,6 +317,20 @@ internal static class RemoteNotificationDesktopServiceFactory
 
             lock (_writeGate)
             {
+                const long maxRecordBytes = 4L * 1024 * 1024;
+                var current = new FileInfo(path);
+                if (current.Exists && current.Length >= maxRecordBytes)
+                {
+                    var archivePath = path + ".1";
+                    File.Move(path, archivePath, overwrite: true);
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        File.SetUnixFileMode(
+                            archivePath,
+                            UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
+                }
+
                 File.AppendAllText(path, line + Environment.NewLine);
                 if (!OperatingSystem.IsWindows())
                 {

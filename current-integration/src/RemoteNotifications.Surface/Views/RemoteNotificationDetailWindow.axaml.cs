@@ -396,7 +396,7 @@ public sealed partial class RemoteNotificationDetailWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo
+            using var process = Process.Start(new ProcessStartInfo
             {
                 FileName = uri.AbsoluteUri,
                 UseShellExecute = true

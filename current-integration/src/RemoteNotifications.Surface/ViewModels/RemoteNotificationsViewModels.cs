@@ -397,15 +397,27 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
     private async Task ObserveServiceAsync(CancellationToken cancellationToken)
     {
+        (string Latest, int TotalAccepted, int InjectCount, int Fetched, int Shown)? lastRevision = null;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 var state = await _serviceClient!.GetStateAsync(cancellationToken).ConfigureAwait(false);
+                var currentRevision = (state.Latest, state.TotalAccepted, state.InjectCount, state.Fetched, state.Shown);
+                var snapshotChanged = lastRevision != currentRevision;
+                lastRevision = currentRevision;
+
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     ApplyServiceState(state);
-                    ReloadPersistedSnapshot();
+                    if (snapshotChanged)
+                    {
+                        ReloadPersistedSnapshot();
+                    }
+                    else
+                    {
+                        RefreshRelativeTimesIfDue();
+                    }
                 });
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -423,7 +435,7 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -446,16 +458,27 @@ public sealed partial class RemoteNotificationsViewModel : MyPowerTools.Avalonia
         Shown = state.Shown.ToString(CultureInfo.InvariantCulture);
     }
 
+    private void RefreshRelativeTimesIfDue()
+    {
+        if (DateTimeOffset.UtcNow - _lastRelativeTimeRefresh < TimeSpan.FromSeconds(15))
+        {
+            return;
+        }
+
+        foreach (var message in Messages)
+        {
+            message.RefreshRelativeTime();
+        }
+
+        _lastRelativeTimeRefresh = DateTimeOffset.UtcNow;
+    }
+
     private void ReloadPersistedSnapshot()
     {
         var snapshot = _store.Load();
         if (ReferenceEquals(snapshot, _lastObservedSnapshot))
         {
-            if (DateTimeOffset.UtcNow - _lastRelativeTimeRefresh >= TimeSpan.FromSeconds(15))
-            {
-                foreach (var message in Messages) message.RefreshRelativeTime();
-                _lastRelativeTimeRefresh = DateTimeOffset.UtcNow;
-            }
+            RefreshRelativeTimesIfDue();
             return;
         }
         var visibleBefore = CaptureVisibleMessageSources();

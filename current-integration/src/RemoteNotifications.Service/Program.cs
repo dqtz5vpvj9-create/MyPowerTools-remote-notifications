@@ -10,7 +10,6 @@ using System.Text.Json.Nodes;
 using MyPowerTools.Ipc;
 using MyPowerTools.Abstractions;
 using MyPowerTools.Platform.Abstractions;
-using MyPowerTools.Platform.Mac;
 using MyPowerTools.RemoteNotifications.Configuration;
 using RemoteNotifications.Surface.Services;
 using RemoteNotifications.Service;
@@ -123,14 +122,24 @@ try
 
         // macOS readiness uses the live control socket. Rewriting a heartbeat
         // every successful empty poll only wakes the supervisor/log consumers.
-        if (!OperatingSystem.IsMacOS())
+        if (!OperatingSystem.IsMacOS() && !string.IsNullOrWhiteSpace(heartbeatFile))
         {
             var heartbeat = $"heartbeat pid={pid} ts={DateTimeOffset.UtcNow:O}";
-            Console.WriteLine(heartbeat);
-            if (!string.IsNullOrEmpty(heartbeatFile))
+            try
             {
-                try { await File.AppendAllTextAsync(heartbeatFile, heartbeat + Environment.NewLine, cts.Token); }
-                catch { /* heartbeat file is best-effort */ }
+                var heartbeatDirectory = Path.GetDirectoryName(heartbeatFile);
+                if (!string.IsNullOrWhiteSpace(heartbeatDirectory))
+                {
+                    Directory.CreateDirectory(heartbeatDirectory);
+                }
+
+                var temporaryHeartbeat = $"{heartbeatFile}.{pid}.tmp";
+                await File.WriteAllTextAsync(temporaryHeartbeat, heartbeat + Environment.NewLine, cts.Token);
+                File.Move(temporaryHeartbeat, heartbeatFile, overwrite: true);
+            }
+            catch when (!cts.Token.IsCancellationRequested)
+            {
+                // Heartbeat file is best-effort.
             }
         }
 

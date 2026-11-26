@@ -1053,6 +1053,7 @@ public sealed class AndroidToolsSharedRuntime
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, AndroidToolsSharedRuntime> Runtimes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _historyWriteGate = new();
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(4) };
 
     private AndroidToolsSharedRuntime(ModuleContext context)
@@ -1135,6 +1136,7 @@ public sealed class AndroidToolsSharedRuntime
 
     internal void AppendRemoteCommandHistory(PowerToolCommand command, CommandExecutionResult result)
     {
+        const long maxHistoryBytes = 4L * 1024 * 1024;
         var path = Path.Combine(DataRoot, "remote-command-history.jsonl");
         var entry = new JsonObject
         {
@@ -1146,7 +1148,17 @@ public sealed class AndroidToolsSharedRuntime
             ["errorCode"] = result.Error?.Code ?? ""
         };
 
-        File.AppendAllText(path, entry.ToJsonString() + Environment.NewLine);
+        lock (_historyWriteGate)
+        {
+            Directory.CreateDirectory(DataRoot);
+            var current = new FileInfo(path);
+            if (current.Exists && current.Length >= maxHistoryBytes)
+            {
+                File.Move(path, path + ".1", overwrite: true);
+            }
+
+            File.AppendAllText(path, entry.ToJsonString() + Environment.NewLine);
+        }
     }
 
     internal async Task<JsonObject> CheckNotificationServerAsync(

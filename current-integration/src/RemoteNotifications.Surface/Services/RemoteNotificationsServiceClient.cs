@@ -23,7 +23,9 @@ public sealed record RemoteNotificationsServiceState(
     int PollIntervalSeconds,
     string NotificationState,
     string NotificationAuthorization,
-    string NotificationError);
+    string NotificationError,
+    int TotalAccepted = 0,
+    int InjectCount = 0);
 
 /// <summary>
 /// Product-side client for the independent Remote Notifications Service Unit. The Surface uses
@@ -186,7 +188,9 @@ public sealed class RemoteNotificationsServiceClient : IRemoteNotificationsServi
             Math.Max(5, ReadInt32(data, "pollIntervalSeconds", 30)),
             ReadString(data, "notificationState", "not-attempted"),
             ReadString(data, "notificationAuthorization", "unknown"),
-            ReadString(data, "notificationError", ""));
+            ReadString(data, "notificationError", ""),
+            ReadInt32(data, "totalAccepted"),
+            ReadInt32(data, "injectCount"));
     }
 
     private static string ReadString(JsonElement element, string name, string fallback) =>

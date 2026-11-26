@@ -123,7 +123,7 @@ internal static class ProductActivationLauncher
             };
             startInfo.ArgumentList.Add(ToolActivationProtocol.ArgumentName);
             startInfo.ArgumentList.Add(ToolActivationProtocol.Serialize(activation));
-            var process = Process.Start(startInfo);
+            using var process = Process.Start(startInfo);
             if (process is null)
             {
                 return false;
